@@ -1,0 +1,66 @@
+name: mise_en_pic
+description: "Mise en Pic — snap a dish, get its recipe as a vintage cookbook page."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Routing
+  go_router: ^16.2.1
+
+  # Camera
+  camera: ^0.11.1
+
+  # AI
+  google_generative_ai: ^0.4.6
+
+  # Markdown rendering
+  flutter_markdown: ^0.7.6
+
+  # Image handling
+  image: ^4.5.3
+  path_provider: ^2.1.5
+  path: ^1.9.1
+
+  # Utilities
+  equatable: ^2.0.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  android: true
+  image_path: "assets/branding/app_icon.png"
+  adaptive_icon_background: "#E8EFE6"
+  adaptive_icon_foreground: "assets/branding/app_icon.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/branding/
+
+  fonts:
+    - family: SourceSerif4
+      fonts:
+        - asset: assets/fonts/SourceSerif4-Variable.ttf
+          weight: 400
+        - asset: assets/fonts/SourceSerif4-Variable.ttf
+          weight: 500
+        - asset: assets/fonts/SourceSerif4-Variable.ttf
+          weight: 600
+        - asset: assets/fonts/SourceSerif4-Variable.ttf
+          weight: 700
+        - asset: assets/fonts/SourceSerif4-Italic-Variable.ttf
+          style: italic
