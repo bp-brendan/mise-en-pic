@@ -49,7 +49,8 @@ _STAPLES = {
 }
 
 _CREDIT_MAP = {
-    "credits_10_pack": 10,
+    "credits_5_pack": 5,
+    "credits_25_pack": 25,
     "credits_100_pack": 100,
 }
 

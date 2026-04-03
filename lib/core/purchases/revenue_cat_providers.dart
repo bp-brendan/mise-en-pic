@@ -1,15 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
-import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
-
-/// The entitlement identifier configured in the RevenueCat dashboard.
-const _entitlementId = 'Mise en Pic Pro';
 
 // ── Initialisation ───────────────────────────────────────────────
 
-/// Call once at app startup, before runApp.
+/// Call once at app startup, after Firebase.initializeApp() and auth.
 Future<void> configureRevenueCat() async {
   await Purchases.setLogLevel(LogLevel.debug);
 
@@ -22,19 +19,23 @@ Future<void> configureRevenueCat() async {
   await Purchases.configure(configuration);
 }
 
+/// Link RevenueCat user to Firebase UID so webhooks can map purchases.
+/// Call after both auth and RevenueCat are initialised.
+Future<void> loginRevenueCat(String uid) async {
+  await Purchases.logIn(uid);
+}
+
 // ── Customer Info ────────────────────────────────────────────────
 
-/// Streams [CustomerInfo] updates (purchase, restore, renewal, expiry).
+/// Streams [CustomerInfo] updates (purchase, restore, expiry).
 final customerInfoProvider = StreamProvider<CustomerInfo>((ref) {
   final controller = StreamController<CustomerInfo>();
 
-  // Seed with current info.
   Purchases.getCustomerInfo().then(
     (info) => controller.add(info),
     onError: controller.addError,
   );
 
-  // Listen for updates.
   void listener(CustomerInfo info) => controller.add(info);
   Purchases.addCustomerInfoUpdateListener(listener);
 
@@ -46,31 +47,37 @@ final customerInfoProvider = StreamProvider<CustomerInfo>((ref) {
   return controller.stream;
 });
 
-/// Whether the user currently has the "Mise en Pic Pro" entitlement.
-final isProProvider = Provider<bool>((ref) {
-  final info = ref.watch(customerInfoProvider).valueOrNull;
-  if (info == null) return false;
-  return info.entitlements.all[_entitlementId]?.isActive ?? false;
+// ── Offerings ────────────────────────────────────────────────────
+
+/// Fetches available product offerings from RevenueCat.
+final offeringsProvider = FutureProvider<Offerings>((ref) async {
+  return Purchases.getOfferings();
 });
 
 // ── Purchases ────────────────────────────────────────────────────
 
-/// Present the RevenueCat paywall only if the entitlement is not active.
-Future<PaywallResult> showPaywall() async {
-  return RevenueCatUI.presentPaywallIfNeeded(_entitlementId);
-}
-
-/// Present the paywall unconditionally (e.g. from a settings button).
-Future<PaywallResult> showPaywallAlways() async {
-  return RevenueCatUI.presentPaywall();
-}
-
-/// Present the Customer Center (manage subscription, request refund, etc.).
-Future<void> showCustomerCenter() async {
-  await RevenueCatUI.presentCustomerCenter();
+/// Purchase a credit pack via RevenueCat (headless).
+/// Returns [CustomerInfo] on success, throws on failure/cancellation.
+Future<CustomerInfo> purchaseCredits(Package package) async {
+  try {
+    final result = await Purchases.purchase(PurchaseParams.package(package));
+    return result.customerInfo;
+  } on PlatformException catch (e) {
+    final errorCode = PurchasesErrorHelper.getErrorCode(e);
+    if (errorCode == PurchasesErrorCode.purchaseCancelledError) {
+      throw const _PurchaseCancelledException();
+    }
+    rethrow;
+  }
 }
 
 /// Restore purchases (e.g. after reinstall or new device).
 Future<CustomerInfo> restorePurchases() async {
   return Purchases.restorePurchases();
+}
+
+class _PurchaseCancelledException implements Exception {
+  const _PurchaseCancelledException();
+  @override
+  String toString() => 'Purchase cancelled by user.';
 }

@@ -10,7 +10,7 @@ import '../../../camera/domain/models/dietary_modifier.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
 import '../../../../core/utils/recipe_sharer.dart';
-import '../../../recipe/data/gemini_service.dart';
+import '../../../recipe/domain/recipe_utils.dart';
 import '../../../recipe/domain/models/recipe_result.dart';
 import '../../../recipe/presentation/providers/recipe_providers.dart';
 
@@ -72,7 +72,7 @@ class _SavedRecipeDetailScreenState
     final ink = theme.colorScheme.onSurface;
     final gridBytes = _loadGridBytes();
     final steps = _recipe.steps;
-    final featured = GeminiService.featuredIndices(_recipe.ingredients);
+    final featured = RecipeUtils.featuredIndices(_recipe.ingredients);
 
     return Scaffold(
       backgroundColor: CookbookPalette.lightBackground,
@@ -437,7 +437,7 @@ class _SpriteCellState extends State<_SpriteCell> {
   Widget build(BuildContext context) {
     if (_decoded == null) return const SizedBox.shrink();
 
-    const cols = GeminiService.gridColumns;
+    const cols = RecipeUtils.gridColumns;
     final rows = (widget.totalItems / cols).ceil();
     final col = widget.index % cols;
     final row = widget.index ~/ cols;

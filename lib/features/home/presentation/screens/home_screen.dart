@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../../../core/purchases/revenue_cat_providers.dart';
+import '../../../../core/purchases/credit_paywall_sheet.dart';
+import '../../../../core/purchases/credit_providers.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
 import '../../../../core/widgets/tactile_button.dart';
@@ -28,7 +29,7 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final ink = theme.colorScheme.onSurface;
-    final isPro = ref.watch(isProProvider);
+    final credits = ref.watch(userCreditsProvider).valueOrNull ?? 0;
 
     return Scaffold(
       body: SafeArea(
@@ -36,16 +37,42 @@ class HomeScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             children: [
-              // Pro badge / settings row
+              // Credit count / buy button
               Align(
                 alignment: Alignment.centerRight,
-                child: IconButton(
-                  icon: Icon(
-                    isPro ? Icons.settings_outlined : Icons.workspace_premium_outlined,
-                    color: isPro ? ink.withValues(alpha: 0.5) : CookbookPalette.lightAccent,
+                child: GestureDetector(
+                  onTap: () => showCreditPaywall(context),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: theme.cardColor,
+                      borderRadius:
+                          BorderRadius.circular(CookbookTheme.brutalRadius),
+                      border: Border.all(
+                        color: theme.colorScheme.outline,
+                        width: CookbookTheme.strokeWidth,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome,
+                          size: 14,
+                          color: CookbookPalette.lightAccent,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          '$credits',
+                          style: CookbookTheme.titleStyle(
+                            fontSize: 14,
+                            color: ink,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  tooltip: isPro ? 'Manage subscription' : 'Upgrade to Pro',
-                  onPressed: () => isPro ? showCustomerCenter() : showPaywall(),
                 ),
               ),
 
@@ -53,7 +80,7 @@ class HomeScreen extends ConsumerWidget {
 
               // Logo / title area
               Text(
-                '🍽️',
+                '\u{1F37D}\u{FE0F}',
                 style: const TextStyle(fontSize: 56),
               ),
               const SizedBox(height: 12),

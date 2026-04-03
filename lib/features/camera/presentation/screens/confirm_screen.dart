@@ -1,9 +1,12 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/purchases/credit_paywall_sheet.dart';
+import '../../../../core/purchases/credit_providers.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
 import '../../domain/models/dietary_modifier.dart';
@@ -11,16 +14,16 @@ import '../widgets/dietary_toggle_row.dart';
 
 /// Shared confirmation screen: shows frozen image + dietary toggles.
 /// Used by both camera capture and gallery pick flows.
-class ConfirmScreen extends StatefulWidget {
+class ConfirmScreen extends ConsumerStatefulWidget {
   const ConfirmScreen({super.key, required this.imageBytes});
 
   final Uint8List imageBytes;
 
   @override
-  State<ConfirmScreen> createState() => _ConfirmScreenState();
+  ConsumerState<ConfirmScreen> createState() => _ConfirmScreenState();
 }
 
-class _ConfirmScreenState extends State<ConfirmScreen> {
+class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
   static const _prefKey = 'last_dietary_modifier';
   DietaryModifier _modifier = DietaryModifier.standard;
 
@@ -46,8 +49,19 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
     await prefs.setString(_prefKey, m.name);
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     _saveModifier(_modifier);
+
+    // Pre-flight credit check.
+    final hasCredits = ref.read(hasCreditsProvider);
+    if (!hasCredits) {
+      if (!mounted) return;
+      final purchased = await showCreditPaywall(context);
+      // If they didn't buy, don't proceed.
+      if (!purchased || !mounted) return;
+    }
+
+    if (!mounted) return;
     context.push(
       '/recipe',
       extra: {
@@ -60,6 +74,7 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final credits = ref.watch(userCreditsProvider).valueOrNull ?? 0;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -133,12 +148,39 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
                     width: double.infinity,
                     child: FilledButton(
                       onPressed: _submit,
-                      child: Text(
-                        'Get Recipe',
-                        style: CookbookTheme.titleStyle(
-                          fontSize: 15,
-                          color: CookbookPalette.lightCard,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Get Recipe',
+                            style: CookbookTheme.titleStyle(
+                              fontSize: 15,
+                              color: CookbookPalette.lightCard,
+                            ),
+                          ),
+                          if (credits > 0) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(
+                                  CookbookTheme.brutalRadius,
+                                ),
+                              ),
+                              child: Text(
+                                '$credits',
+                                style: CookbookTheme.labelStyle(
+                                  fontSize: 11,
+                                  color: CookbookPalette.lightCard,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),

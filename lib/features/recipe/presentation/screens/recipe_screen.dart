@@ -10,7 +10,7 @@ import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
 import '../../../../core/utils/recipe_sharer.dart';
 import '../../../camera/domain/models/dietary_modifier.dart';
-import '../../data/gemini_service.dart';
+import '../../domain/recipe_utils.dart';
 import '../../domain/models/recipe_result.dart';
 import '../providers/recipe_providers.dart';
 
@@ -627,7 +627,7 @@ class _IngredientSpriteState extends State<_IngredientSprite> {
   Widget build(BuildContext context) {
     if (_decoded == null) return const SizedBox.shrink();
 
-    const cols = GeminiService.gridColumns;
+    const cols = RecipeUtils.gridColumns;
     final rows = (widget.totalItems / cols).ceil();
     final col = widget.index % cols;
     final row = widget.index ~/ cols;
