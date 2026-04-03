@@ -27,8 +27,6 @@ class RecipeScreen extends ConsumerStatefulWidget {
 }
 
 class _RecipeScreenState extends ConsumerState<RecipeScreen> {
-  bool _saved = false;
-
   @override
   void initState() {
     super.initState();
@@ -40,24 +38,15 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
     });
   }
 
-  Future<void> _save() async {
-    final ok =
-        await ref.read(recipeNotifierProvider.notifier).save(widget.imageBytes);
-    if (ok && mounted) {
-      setState(() => _saved = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recipe saved!')),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(recipeNotifierProvider);
     final theme = Theme.of(context);
 
     return Scaffold(
+      backgroundColor: CookbookPalette.lightBackground,
       appBar: AppBar(
+        backgroundColor: CookbookPalette.lightBackground,
         title: Text(
           'Your Recipe',
           style: CookbookTheme.headlineStyle(
@@ -65,16 +54,22 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
           ),
         ),
         actions: [
-          if (state is RecipeSuccess)
-            IconButton(
-              onPressed: _saved ? null : _save,
-              icon: Icon(
-                _saved ? Icons.bookmark : Icons.bookmark_border,
-                color: _saved
-                    ? CookbookPalette.lightAccent
-                    : theme.colorScheme.onSurface,
-              ),
-            ),
+          if (state case RecipeSuccess(:final recipe)) ...[
+            Builder(builder: (context) {
+              return IconButton(
+                onPressed: () =>
+                    ref.read(recipeNotifierProvider.notifier).togglePin(),
+                icon: Icon(
+                  recipe.isPinned
+                      ? Icons.push_pin
+                      : Icons.push_pin_outlined,
+                  color: recipe.isPinned
+                      ? CookbookPalette.lightAccent
+                      : theme.colorScheme.onSurface,
+                ),
+              );
+            }),
+          ],
         ],
       ),
       body: AnimatedSwitcher(

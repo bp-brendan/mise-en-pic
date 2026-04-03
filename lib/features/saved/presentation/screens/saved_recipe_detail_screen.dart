@@ -2,31 +2,70 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
 import '../../../recipe/data/gemini_service.dart';
 import '../../../recipe/domain/models/recipe_result.dart';
+import '../../../recipe/presentation/providers/recipe_providers.dart';
 
 /// Displays a previously saved recipe with its illustrations.
-class SavedRecipeDetailScreen extends StatelessWidget {
+class SavedRecipeDetailScreen extends ConsumerStatefulWidget {
   const SavedRecipeDetailScreen({super.key, required this.recipe});
 
   final RecipeResult recipe;
+
+  @override
+  ConsumerState<SavedRecipeDetailScreen> createState() =>
+      _SavedRecipeDetailScreenState();
+}
+
+class _SavedRecipeDetailScreenState
+    extends ConsumerState<SavedRecipeDetailScreen> {
+  late RecipeResult _recipe;
+
+  @override
+  void initState() {
+    super.initState();
+    _recipe = widget.recipe;
+  }
+
+  Future<void> _togglePin() async {
+    final repo = ref.read(recipeRepositoryProvider);
+    final updated = await repo.togglePin(_recipe);
+    HapticFeedback.selectionClick();
+    if (mounted) setState(() => _recipe = updated);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final ink = theme.colorScheme.onSurface;
     final gridBytes = _loadGridBytes();
-    final steps = recipe.steps;
+    final steps = _recipe.steps;
 
     return Scaffold(
+      // Use the same sage background so illustrations blend seamlessly.
+      backgroundColor: CookbookPalette.lightBackground,
       appBar: AppBar(
+        backgroundColor: CookbookPalette.lightBackground,
         title: Text(
-          recipe.dishName,
+          _recipe.dishName,
           style: CookbookTheme.headlineStyle(fontSize: 18, color: ink),
         ),
+        actions: [
+          IconButton(
+            onPressed: _togglePin,
+            icon: Icon(
+              _recipe.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+              color: _recipe.isPinned
+                  ? CookbookPalette.lightAccent
+                  : ink.withValues(alpha: 0.4),
+            ),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -34,9 +73,9 @@ class SavedRecipeDetailScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Dish illustration or photo fallback
-            if (recipe.dishImagePath != null)
+            if (_recipe.dishImagePath != null)
               Image.file(
-                File(recipe.dishImagePath!),
+                File(_recipe.dishImagePath!),
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => _photoFallback(),
               )
@@ -47,7 +86,7 @@ class SavedRecipeDetailScreen extends StatelessWidget {
             // Title
             Center(
               child: Text(
-                recipe.dishName,
+                _recipe.dishName,
                 textAlign: TextAlign.center,
                 style: CookbookTheme.displayStyle(
                   fontSize: 34,
@@ -56,11 +95,11 @@ class SavedRecipeDetailScreen extends StatelessWidget {
                 ).copyWith(shadows: CookbookTheme.letterpressShadows(ink)),
               ),
             ),
-            if (recipe.tagline.isNotEmpty) ...[
+            if (_recipe.tagline.isNotEmpty) ...[
               const SizedBox(height: 6),
               Center(
                 child: Text(
-                  recipe.tagline,
+                  _recipe.tagline,
                   textAlign: TextAlign.center,
                   style: CookbookTheme.bodyStyle(
                     fontSize: 14,
@@ -73,14 +112,14 @@ class SavedRecipeDetailScreen extends StatelessWidget {
             const SizedBox(height: 10),
 
             // Meta row
-            _MetaRow(recipe: recipe, ink: ink),
+            _MetaRow(recipe: _recipe, ink: ink),
 
             const SizedBox(height: 28),
 
             // Ingredients
             _SectionLabel(label: 'INGREDIENTS', ink: ink),
             const SizedBox(height: 12),
-            ...recipe.ingredients.asMap().entries.map((entry) {
+            ..._recipe.ingredients.asMap().entries.map((entry) {
               final index = entry.key;
               final ing = entry.value;
               return Padding(
@@ -97,7 +136,7 @@ class SavedRecipeDetailScreen extends StatelessWidget {
                               child: _SpriteCell(
                                 gridImage: gridBytes,
                                 index: index,
-                                totalItems: recipe.ingredients.length,
+                                totalItems: _recipe.ingredients.length,
                               ),
                             )
                           : Center(
@@ -135,7 +174,7 @@ class SavedRecipeDetailScreen extends StatelessWidget {
             ...steps.asMap().entries.map((entry) {
               final stepIndex = entry.key;
               final stepText = entry.value;
-              final matches = recipe.ingredientIndicesForStep(stepText);
+              final matches = _recipe.ingredientIndicesForStep(stepText);
               final spriteIdx = matches.isNotEmpty ? matches.first : null;
 
               return _MethodStep(
@@ -144,7 +183,7 @@ class SavedRecipeDetailScreen extends StatelessWidget {
                 ink: ink,
                 gridImage: gridBytes,
                 spriteIndex: spriteIdx,
-                totalIngredients: recipe.ingredients.length,
+                totalIngredients: _recipe.ingredients.length,
                 layoutVariant: stepIndex % 3,
               );
             }),
@@ -157,7 +196,7 @@ class SavedRecipeDetailScreen extends StatelessWidget {
   }
 
   Uint8List? _loadGridBytes() {
-    final path = recipe.gridImagePath;
+    final path = _recipe.gridImagePath;
     if (path == null) return null;
     final file = File(path);
     if (!file.existsSync()) return null;
@@ -165,8 +204,8 @@ class SavedRecipeDetailScreen extends StatelessWidget {
   }
 
   Widget _photoFallback() {
-    if (recipe.imagePath != null) {
-      return Image.file(File(recipe.imagePath!), fit: BoxFit.cover);
+    if (_recipe.imagePath != null) {
+      return Image.file(File(_recipe.imagePath!), fit: BoxFit.cover);
     }
     return const SizedBox(
       height: 200,

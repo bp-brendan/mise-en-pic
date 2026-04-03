@@ -45,6 +45,9 @@ class RecipeResult {
     this.prepTime = '',
     this.cookTime = '',
     this.servings = '',
+    this.isPinned = false,
+    this.savedAt,
+    this.jsonPath,
     this.imagePath,
     this.dishImagePath,
     this.gridImagePath,
@@ -58,6 +61,11 @@ class RecipeResult {
   final String prepTime;
   final String cookTime;
   final String servings;
+  final bool isPinned;
+  final int? savedAt; // millisecondsSinceEpoch
+
+  /// Path to the JSON file on disk (for updates/deletes).
+  final String? jsonPath;
 
   /// Path to the original camera photo on disk.
   final String? imagePath;
@@ -110,6 +118,9 @@ class RecipeResult {
       prepTime: json['prepTime'] as String? ?? '',
       cookTime: json['cookTime'] as String? ?? '',
       servings: json['servings'] as String? ?? '',
+      isPinned: json['isPinned'] as bool? ?? false,
+      savedAt: json['savedAt'] as int?,
+      jsonPath: json['jsonPath'] as String?,
       imagePath: json['imagePath'] as String?,
       dishImagePath: json['dishImagePath'] as String?,
       gridImagePath: json['gridImagePath'] as String?,
@@ -125,12 +136,18 @@ class RecipeResult {
         'prepTime': prepTime,
         'cookTime': cookTime,
         'servings': servings,
+        'isPinned': isPinned,
+        'savedAt': savedAt,
+        'jsonPath': jsonPath,
         'imagePath': imagePath,
         'dishImagePath': dishImagePath,
         'gridImagePath': gridImagePath,
       };
 
   RecipeResult copyWith({
+    bool? isPinned,
+    int? savedAt,
+    String? jsonPath,
     String? imagePath,
     String? dishImagePath,
     String? gridImagePath,
@@ -144,6 +161,9 @@ class RecipeResult {
         prepTime: prepTime,
         cookTime: cookTime,
         servings: servings,
+        isPinned: isPinned ?? this.isPinned,
+        savedAt: savedAt ?? this.savedAt,
+        jsonPath: jsonPath ?? this.jsonPath,
         imagePath: imagePath ?? this.imagePath,
         dishImagePath: dishImagePath ?? this.dishImagePath,
         gridImagePath: gridImagePath ?? this.gridImagePath,

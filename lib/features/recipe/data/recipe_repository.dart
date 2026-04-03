@@ -58,18 +58,50 @@ class RecipeRepository {
     }
 
     // Save JSON with image path references.
+    final jsonPath = '$prefix.json';
     final updated = recipe.copyWith(
       imagePath: photoPath,
       dishImagePath: dishPath,
       gridImagePath: gridPath,
+      jsonPath: jsonPath,
+      savedAt: stamp,
     );
-    final jsonPath = '${prefix}.json';
     await File(jsonPath).writeAsString(jsonEncode(updated.toJson()));
 
     return updated;
   }
 
-  /// Load all saved recipes, newest first.
+  /// Update a saved recipe's JSON (e.g. after pin toggle).
+  Future<void> _updateJson(RecipeResult recipe) async {
+    final path = recipe.jsonPath;
+    if (path == null) return;
+    await File(path).writeAsString(jsonEncode(recipe.toJson()));
+  }
+
+  /// Toggle the pinned state of a recipe.
+  Future<RecipeResult> togglePin(RecipeResult recipe) async {
+    final updated = recipe.copyWith(isPinned: !recipe.isPinned);
+    await _updateJson(updated);
+    return updated;
+  }
+
+  /// Delete a recipe and all its associated files.
+  Future<void> delete(RecipeResult recipe) async {
+    final paths = [
+      recipe.jsonPath,
+      recipe.imagePath,
+      recipe.dishImagePath,
+      recipe.gridImagePath,
+    ];
+    for (final path in paths) {
+      if (path != null) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+    }
+  }
+
+  /// Load all saved recipes, pinned first then newest first.
   Future<List<RecipeResult>> loadAll() async {
     final dir = await _recipesDir();
     if (!await dir.exists()) return [];
@@ -87,11 +119,23 @@ class RecipeRepository {
       try {
         final content = await file.readAsString();
         final json = jsonDecode(content) as Map<String, dynamic>;
-        results.add(RecipeResult.fromJson(json));
+        var recipe = RecipeResult.fromJson(json);
+        // Backfill jsonPath for older saves that don't have it.
+        if (recipe.jsonPath == null) {
+          recipe = recipe.copyWith(jsonPath: file.path);
+        }
+        results.add(recipe);
       } catch (_) {
         // Skip corrupted entries.
       }
     }
+
+    // Sort: pinned first, then by savedAt descending.
+    results.sort((a, b) {
+      if (a.isPinned != b.isPinned) return a.isPinned ? -1 : 1;
+      return (b.savedAt ?? 0).compareTo(a.savedAt ?? 0);
+    });
+
     return results;
   }
 

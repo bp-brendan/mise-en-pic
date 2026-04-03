@@ -71,7 +71,7 @@ class RecipeNotifier extends StateNotifier<RecipeState> {
   final GeminiService _service;
   final RecipeRepository _repository;
 
-  /// Full pipeline: text first (shows immediately), then images load async.
+  /// Full pipeline: text first → auto-save → images load async → update save.
   Future<void> generate({
     required Uint8List imageBytes,
     required DietaryModifier modifier,
@@ -90,6 +90,13 @@ class RecipeNotifier extends StateNotifier<RecipeState> {
       return;
     }
 
+    // Auto-save immediately with text only.
+    try {
+      recipe = await _repository.save(recipe, imageBytes);
+    } catch (_) {
+      // Save failure shouldn't block the UI.
+    }
+
     // Show recipe text immediately while images generate.
     state = RecipeSuccess(recipe);
 
@@ -102,32 +109,38 @@ class RecipeNotifier extends StateNotifier<RecipeState> {
     final dishImage = results[0];
     final gridImage = results[1];
 
+    // Re-save with images now included.
+    if (dishImage != null || gridImage != null) {
+      try {
+        // Delete the text-only save, re-save with images.
+        await _repository.delete(recipe);
+        recipe = await _repository.save(
+          recipe,
+          imageBytes,
+          dishImage: dishImage,
+          gridImage: gridImage,
+        );
+      } catch (_) {}
+    }
+
     // Update state with images.
     if (mounted) {
       state = RecipeSuccess(recipe, dishImage: dishImage, gridImage: gridImage);
     }
   }
 
-  /// Save the current recipe with all assets.
-  Future<bool> save(Uint8List photoBytes) async {
+  /// Toggle pin on the current recipe.
+  Future<void> togglePin() async {
     final current = state;
-    if (current is! RecipeSuccess) return false;
+    if (current is! RecipeSuccess) return;
     try {
-      final updated = await _repository.save(
-        current.recipe,
-        photoBytes,
-        dishImage: current.dishImage,
-        gridImage: current.gridImage,
-      );
+      final updated = await _repository.togglePin(current.recipe);
       state = RecipeSuccess(
         updated,
         dishImage: current.dishImage,
         gridImage: current.gridImage,
       );
-      return true;
-    } catch (_) {
-      return false;
-    }
+    } catch (_) {}
   }
 }
 
