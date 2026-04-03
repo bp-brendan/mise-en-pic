@@ -3,10 +3,10 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
-/// Direct REST client for Gemini image generation.
+/// REST client for Imagen 4 Fast image generation.
 ///
-/// The Dart `google_generative_ai` SDK (v0.4.x) does not expose
-/// `responseModalities`, so we call the REST API directly for image output.
+/// Uses the `:predict` endpoint on Google AI, which is significantly cheaper
+/// than Gemini's native image generation (no thinking-token overhead).
 class GeminiImageClient {
   GeminiImageClient({required this.apiKey});
 
@@ -14,40 +14,31 @@ class GeminiImageClient {
 
   static const _baseUrl =
       'https://generativelanguage.googleapis.com/v1beta/models';
-  static const _model = 'gemini-2.5-flash-image';
+  static const _model = 'imagen-4.0-fast-generate-001';
 
   /// Generate an image from a text prompt.
   ///
-  /// Returns the raw PNG/JPEG bytes of the generated image, or null if
-  /// the model returned no image.
+  /// [aspectRatio] defaults to `"1:1"`. Supported values:
+  /// `"1:1"`, `"3:4"`, `"4:3"`, `"9:16"`, `"16:9"`.
+  ///
+  /// Returns the raw PNG bytes of the generated image, or null on failure.
   Future<Uint8List?> generateImage({
     required String prompt,
-    String? systemInstruction,
+    String? systemInstruction, // ignored — Imagen has no system instruction
+    String aspectRatio = '1:1',
   }) async {
-    final url = Uri.parse('$_baseUrl/$_model:generateContent?key=$apiKey');
+    final url = Uri.parse('$_baseUrl/$_model:predict?key=$apiKey');
 
-    final body = <String, dynamic>{
-      'contents': [
-        {
-          'parts': [
-            {'text': prompt},
-          ],
-        },
+    final body = {
+      'instances': [
+        {'prompt': prompt},
       ],
-      'generationConfig': {
-        'responseModalities': ['IMAGE', 'TEXT'],
-        'temperature': 0.8,
-        'maxOutputTokens': 4096,
+      'parameters': {
+        'sampleCount': 1,
+        'aspectRatio': aspectRatio,
+        'personGeneration': 'dont_allow',
       },
     };
-
-    if (systemInstruction != null) {
-      body['systemInstruction'] = {
-        'parts': [
-          {'text': systemInstruction},
-        ],
-      };
-    }
 
     final response = await http.post(
       url,
@@ -57,29 +48,18 @@ class GeminiImageClient {
 
     if (response.statusCode != 200) {
       throw Exception(
-        'Gemini image API error ${response.statusCode}: ${response.body}',
+        'Imagen API error ${response.statusCode}: ${response.body}',
       );
     }
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
-    final candidates = json['candidates'] as List<dynamic>?;
-    if (candidates == null || candidates.isEmpty) return null;
+    final predictions = json['predictions'] as List<dynamic>?;
+    if (predictions == null || predictions.isEmpty) return null;
 
-    final content = candidates[0]['content'] as Map<String, dynamic>?;
-    final parts = content?['parts'] as List<dynamic>?;
-    if (parts == null) return null;
+    final data =
+        predictions[0]['bytesBase64Encoded'] as String?;
+    if (data == null) return null;
 
-    // Find the first inline image part.
-    for (final part in parts) {
-      final inlineData = part['inlineData'] as Map<String, dynamic>?;
-      if (inlineData != null) {
-        final data = inlineData['data'] as String?;
-        if (data != null) {
-          return base64Decode(data);
-        }
-      }
-    }
-
-    return null;
+    return base64Decode(data);
   }
 }

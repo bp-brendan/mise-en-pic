@@ -45,6 +45,7 @@ class RecipeResult {
     this.prepTime = '',
     this.cookTime = '',
     this.servings = '',
+    this.caloriesPerServing,
     this.isPinned = false,
     this.savedAt,
     this.jsonPath,
@@ -61,6 +62,7 @@ class RecipeResult {
   final String prepTime;
   final String cookTime;
   final String servings;
+  final int? caloriesPerServing;
   final bool isPinned;
   final int? savedAt; // millisecondsSinceEpoch
 
@@ -118,6 +120,7 @@ class RecipeResult {
       prepTime: json['prepTime'] as String? ?? '',
       cookTime: json['cookTime'] as String? ?? '',
       servings: json['servings'] as String? ?? '',
+      caloriesPerServing: json['caloriesPerServing'] as int?,
       isPinned: json['isPinned'] as bool? ?? false,
       savedAt: json['savedAt'] as int?,
       jsonPath: json['jsonPath'] as String?,
@@ -136,6 +139,7 @@ class RecipeResult {
         'prepTime': prepTime,
         'cookTime': cookTime,
         'servings': servings,
+        'caloriesPerServing': caloriesPerServing,
         'isPinned': isPinned,
         'savedAt': savedAt,
         'jsonPath': jsonPath,
@@ -161,6 +165,7 @@ class RecipeResult {
         prepTime: prepTime,
         cookTime: cookTime,
         servings: servings,
+        caloriesPerServing: caloriesPerServing,
         isPinned: isPinned ?? this.isPinned,
         savedAt: savedAt ?? this.savedAt,
         jsonPath: jsonPath ?? this.jsonPath,

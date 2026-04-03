@@ -1,12 +1,15 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../camera/domain/models/dietary_modifier.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
+import '../../../../core/utils/recipe_sharer.dart';
 import '../../../recipe/data/gemini_service.dart';
 import '../../../recipe/domain/models/recipe_result.dart';
 import '../../../recipe/presentation/providers/recipe_providers.dart';
@@ -32,6 +35,30 @@ class _SavedRecipeDetailScreenState
     _recipe = widget.recipe;
   }
 
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete recipe?'),
+        content: Text('Remove "${_recipe.dishName}" permanently?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete',
+                style: TextStyle(color: CookbookPalette.error)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && context.mounted) {
+      await ref.read(recipeRepositoryProvider).delete(_recipe);
+      if (context.mounted) Navigator.pop(context);
+    }
+  }
+
   Future<void> _togglePin() async {
     final repo = ref.read(recipeRepositoryProvider);
     final updated = await repo.togglePin(_recipe);
@@ -45,9 +72,9 @@ class _SavedRecipeDetailScreenState
     final ink = theme.colorScheme.onSurface;
     final gridBytes = _loadGridBytes();
     final steps = _recipe.steps;
+    final featured = GeminiService.featuredIndices(_recipe.ingredients);
 
     return Scaffold(
-      // Use the same sage background so illustrations blend seamlessly.
       backgroundColor: CookbookPalette.lightBackground,
       appBar: AppBar(
         backgroundColor: CookbookPalette.lightBackground,
@@ -57,6 +84,11 @@ class _SavedRecipeDetailScreenState
         ),
         actions: [
           IconButton(
+            onPressed: () => RecipeSharer.share(
+              context: context, recipe: _recipe),
+            icon: Icon(Icons.ios_share, color: ink),
+          ),
+          IconButton(
             onPressed: _togglePin,
             icon: Icon(
               _recipe.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
@@ -65,130 +97,128 @@ class _SavedRecipeDetailScreenState
                   : ink.withValues(alpha: 0.4),
             ),
           ),
+          IconButton(
+            onPressed: () => _confirmDelete(context),
+            icon: Icon(Icons.delete_outline,
+                color: ink.withValues(alpha: 0.6)),
+          ),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Dish illustration or photo fallback
+            // Dish illustration — square crop, edge to edge
             if (_recipe.dishImagePath != null)
-              Image.file(
-                File(_recipe.dishImagePath!),
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => _photoFallback(),
-              )
-            else
-              _photoFallback(),
-            const SizedBox(height: 24),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final size = constraints.maxWidth;
+                  return SizedBox(
+                    width: size,
+                    height: size,
+                    child: Image.file(
+                      File(_recipe.dishImagePath!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  );
+                },
+              ),
 
-            // Title
-            Center(
-              child: Text(
-                _recipe.dishName,
-                textAlign: TextAlign.center,
-                style: CookbookTheme.displayStyle(
-                  fontSize: 34,
-                  fontWeight: 760,
-                  color: ink,
-                ).copyWith(shadows: CookbookTheme.letterpressShadows(ink)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 14),
+
+                  // Meta row
+                  _MetaRow(recipe: _recipe, ink: ink),
+
+                  const SizedBox(height: 28),
+
+                  // Ingredients
+                  _SectionLabel(label: 'INGREDIENTS', ink: ink),
+                  const SizedBox(height: 12),
+                  ..._recipe.ingredients.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final ing = entry.value;
+                    final spritePos = featured.indexOf(index);
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 52,
+                            height: 52,
+                            child: gridBytes != null && spritePos >= 0
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: _SpriteCell(
+                                      gridImage: gridBytes,
+                                      index: spritePos,
+                                      totalItems: featured.length,
+                                    ),
+                                  )
+                                : Center(
+                                    child: Text(ing.emoji,
+                                        style:
+                                            const TextStyle(fontSize: 28)),
+                                  ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: RichText(
+                              text: TextSpan(
+                                style: CookbookTheme.bodyStyle(
+                                    fontSize: 15, color: ink),
+                                children: [
+                                  TextSpan(
+                                    text: '${ing.amount} ',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                  TextSpan(text: ing.name),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+
+                  const SizedBox(height: 28),
+
+                  // Method
+                  _SectionLabel(label: 'METHOD', ink: ink),
+                  const SizedBox(height: 16),
+                  ...steps.asMap().entries.map((entry) {
+                    final stepIndex = entry.key;
+                    final stepText = entry.value;
+                    final matches =
+                        _recipe.ingredientIndicesForStep(stepText);
+                    int? spritePos;
+                    for (final m in matches) {
+                      final pos = featured.indexOf(m);
+                      if (pos >= 0) { spritePos = pos; break; }
+                    }
+
+                    return _MethodStep(
+                      stepNumber: stepIndex + 1,
+                      text: stepText,
+                      ink: ink,
+                      gridImage: gridBytes,
+                      spriteIndex: spritePos,
+                      totalIngredients: featured.length,
+                    );
+                  }),
+
+                  const SizedBox(height: 40),
+                ],
               ),
             ),
-            if (_recipe.tagline.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Center(
-                child: Text(
-                  _recipe.tagline,
-                  textAlign: TextAlign.center,
-                  style: CookbookTheme.bodyStyle(
-                    fontSize: 14,
-                    fontWeight: 430,
-                    color: ink.withValues(alpha: 0.6),
-                  ).copyWith(fontStyle: FontStyle.italic),
-                ),
-              ),
-            ],
-            const SizedBox(height: 10),
-
-            // Meta row
-            _MetaRow(recipe: _recipe, ink: ink),
-
-            const SizedBox(height: 28),
-
-            // Ingredients
-            _SectionLabel(label: 'INGREDIENTS', ink: ink),
-            const SizedBox(height: 12),
-            ..._recipe.ingredients.asMap().entries.map((entry) {
-              final index = entry.key;
-              final ing = entry.value;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 52,
-                      height: 52,
-                      child: gridBytes != null
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: _SpriteCell(
-                                gridImage: gridBytes,
-                                index: index,
-                                totalItems: _recipe.ingredients.length,
-                              ),
-                            )
-                          : Center(
-                              child: Text(ing.emoji,
-                                  style: const TextStyle(fontSize: 28)),
-                            ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: RichText(
-                        text: TextSpan(
-                          style: CookbookTheme.bodyStyle(
-                              fontSize: 15, color: ink),
-                          children: [
-                            TextSpan(
-                              text: '${ing.amount} ',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600),
-                            ),
-                            TextSpan(text: ing.name),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
-
-            const SizedBox(height: 28),
-
-            // Method
-            _SectionLabel(label: 'METHOD', ink: ink),
-            const SizedBox(height: 16),
-            ...steps.asMap().entries.map((entry) {
-              final stepIndex = entry.key;
-              final stepText = entry.value;
-              final matches = _recipe.ingredientIndicesForStep(stepText);
-              final spriteIdx = matches.isNotEmpty ? matches.first : null;
-
-              return _MethodStep(
-                stepNumber: stepIndex + 1,
-                text: stepText,
-                ink: ink,
-                gridImage: gridBytes,
-                spriteIndex: spriteIdx,
-                totalIngredients: _recipe.ingredients.length,
-                layoutVariant: stepIndex % 3,
-              );
-            }),
-
-            const SizedBox(height: 40),
           ],
         ),
       ),
@@ -203,15 +233,6 @@ class _SavedRecipeDetailScreenState
     return file.readAsBytesSync();
   }
 
-  Widget _photoFallback() {
-    if (_recipe.imagePath != null) {
-      return Image.file(File(_recipe.imagePath!), fit: BoxFit.cover);
-    }
-    return const SizedBox(
-      height: 200,
-      child: Center(child: Text('🍽️', style: TextStyle(fontSize: 48))),
-    );
-  }
 }
 
 // ── Meta row ─────────────────────────────────────────────────────
@@ -226,7 +247,7 @@ class _MetaRow extends StatelessWidget {
     final chips = <Widget>[];
     if (recipe.prepTime.isNotEmpty) {
       chips.add(_MetaChip(
-          icon: Icons.content_cut, label: recipe.prepTime, ink: ink));
+          icon: Icons.restaurant, label: recipe.prepTime, ink: ink));
     }
     if (recipe.cookTime.isNotEmpty) {
       chips.add(_MetaChip(
@@ -238,26 +259,34 @@ class _MetaRow extends StatelessWidget {
           label: 'Serves ${recipe.servings}',
           ink: ink));
     }
-    chips.add(
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: CookbookPalette.lightAccent.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(CookbookTheme.brutalRadius),
-          border: Border.all(
-            color: CookbookPalette.lightAccent.withValues(alpha: 0.3),
+    if (recipe.caloriesPerServing != null) {
+      chips.add(_MetaChip(
+          icon: Icons.whatshot_outlined,
+          label: '${recipe.caloriesPerServing} cal',
+          ink: ink));
+    }
+    if (recipe.modifier != DietaryModifier.standard) {
+      chips.add(
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: CookbookPalette.lightAccent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(CookbookTheme.brutalRadius),
+            border: Border.all(
+              color: CookbookPalette.lightAccent.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Text(
+            recipe.modifier.label,
+            style: CookbookTheme.labelStyle(
+              fontSize: 10,
+              color: CookbookPalette.lightAccent,
+              letterSpacing: 1.8,
+            ),
           ),
         ),
-        child: Text(
-          recipe.modifier.label,
-          style: CookbookTheme.labelStyle(
-            fontSize: 10,
-            color: CookbookPalette.lightAccent,
-            letterSpacing: 1.8,
-          ),
-        ),
-      ),
-    );
+      );
+    }
     return Wrap(
       alignment: WrapAlignment.center,
       spacing: 8,
@@ -311,7 +340,6 @@ class _MethodStep extends StatelessWidget {
     this.gridImage,
     this.spriteIndex,
     required this.totalIngredients,
-    required this.layoutVariant,
   });
 
   final int stepNumber;
@@ -320,102 +348,56 @@ class _MethodStep extends StatelessWidget {
   final Uint8List? gridImage;
   final int? spriteIndex;
   final int totalIngredients;
-  final int layoutVariant;
 
   @override
   Widget build(BuildContext context) {
     final hasSprite = gridImage != null && spriteIndex != null;
-    const spriteSize = 72.0;
-
-    final stepNumWidget = Text(
-      '$stepNumber',
-      style: CookbookTheme.displayStyle(
-        fontSize: 32,
-        fontWeight: 760,
-        color: ink.withValues(alpha: 0.1),
-      ),
-    );
-
-    final textWidget = Text(
-      text,
-      style: CookbookTheme.bodyStyle(fontSize: 16, color: ink)
-          .copyWith(height: 1.55),
-    );
-
-    final spriteWidget = hasSprite
-        ? SizedBox(
-            width: spriteSize,
-            height: spriteSize,
-            child: _SpriteCell(
-              gridImage: gridImage!,
-              index: spriteIndex!,
-              totalItems: totalIngredients,
-            ),
-          )
-        : null;
-
-    Widget content;
-    if (!hasSprite) {
-      content = Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 36, child: stepNumWidget),
-          const SizedBox(width: 8),
-          Expanded(child: textWidget),
-        ],
-      );
-    } else if (layoutVariant == 0) {
-      content = Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 36, child: stepNumWidget),
-          const SizedBox(width: 8),
-          Expanded(child: textWidget),
-          const SizedBox(width: 8),
-          spriteWidget!,
-        ],
-      );
-    } else if (layoutVariant == 1) {
-      content = Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          spriteWidget!,
-          const SizedBox(width: 8),
-          SizedBox(width: 36, child: stepNumWidget),
-          const SizedBox(width: 4),
-          Expanded(child: textWidget),
-        ],
-      );
-    } else {
-      content = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              SizedBox(width: 36, child: stepNumWidget),
-              const SizedBox(width: 12),
-              spriteWidget!,
-            ],
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.only(left: 44),
-            child: textWidget,
-          ),
-        ],
-      );
-    }
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
-      child: content,
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 32,
+            child: Text(
+              '$stepNumber',
+              style: CookbookTheme.displayStyle(
+                fontSize: 28,
+                fontWeight: 760,
+                color: ink.withValues(alpha: 0.1),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: CookbookTheme.bodyStyle(fontSize: 15, color: ink)
+                  .copyWith(height: 1.5),
+            ),
+          ),
+          if (hasSprite) ...[
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: _SpriteCell(
+                gridImage: gridImage!,
+                index: spriteIndex!,
+                totalItems: totalIngredients,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
 
 // ── Sprite cell — crops one cell from the grid image ────────────
 
-class _SpriteCell extends StatelessWidget {
+class _SpriteCell extends StatefulWidget {
   const _SpriteCell({
     required this.gridImage,
     required this.index,
@@ -427,39 +409,75 @@ class _SpriteCell extends StatelessWidget {
   final int totalItems;
 
   @override
+  State<_SpriteCell> createState() => _SpriteCellState();
+}
+
+class _SpriteCellState extends State<_SpriteCell> {
+  ui.Image? _decoded;
+
+  @override
+  void initState() {
+    super.initState();
+    _decode();
+  }
+
+  @override
+  void didUpdateWidget(_SpriteCell old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.gridImage, widget.gridImage)) _decode();
+  }
+
+  Future<void> _decode() async {
+    final codec = await ui.instantiateImageCodec(widget.gridImage);
+    final frame = await codec.getNextFrame();
+    if (mounted) setState(() => _decoded = frame.image);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_decoded == null) return const SizedBox.shrink();
+
     const cols = GeminiService.gridColumns;
-    final rows = (totalItems / cols).ceil();
-    final col = index % cols;
-    final row = index ~/ cols;
+    final rows = (widget.totalItems / cols).ceil();
+    final col = widget.index % cols;
+    final row = widget.index ~/ cols;
+
+    final cellW = _decoded!.width / cols;
+    final cellH = _decoded!.height / rows;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cellW = constraints.maxWidth;
-        final cellH = constraints.maxHeight;
-        final fullW = cellW * cols;
-        final fullH = cellH * rows;
-
-        return ClipRect(
-          child: OverflowBox(
-            alignment: Alignment.topLeft,
-            maxWidth: fullW,
-            maxHeight: fullH,
-            child: Transform.translate(
-              offset: Offset(-col * cellW, -row * cellH),
-              child: Image.memory(
-                gridImage,
-                width: fullW,
-                height: fullH,
-                fit: BoxFit.fill,
-                gaplessPlayback: true,
-              ),
-            ),
+        return CustomPaint(
+          size: Size(constraints.maxWidth, constraints.maxHeight),
+          painter: _SpritePainter(
+            image: _decoded!,
+            srcRect: Rect.fromLTWH(
+                col * cellW, row * cellH, cellW, cellH),
           ),
         );
       },
     );
   }
+}
+
+class _SpritePainter extends CustomPainter {
+  _SpritePainter({required this.image, required this.srcRect});
+  final ui.Image image;
+  final Rect srcRect;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawImageRect(
+      image,
+      srcRect,
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SpritePainter old) =>
+      old.image != image || old.srcRect != srcRect;
 }
 
 // ── Section label ────────────────────────────────────────────────

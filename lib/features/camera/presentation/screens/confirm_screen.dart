@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
@@ -20,9 +21,33 @@ class ConfirmScreen extends StatefulWidget {
 }
 
 class _ConfirmScreenState extends State<ConfirmScreen> {
-  DietaryModifier _modifier = DietaryModifier.vegan;
+  static const _prefKey = 'last_dietary_modifier';
+  DietaryModifier _modifier = DietaryModifier.standard;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedModifier();
+  }
+
+  Future<void> _loadSavedModifier() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_prefKey);
+    if (saved != null) {
+      final match = DietaryModifier.values.where((m) => m.name == saved);
+      if (match.isNotEmpty && mounted) {
+        setState(() => _modifier = match.first);
+      }
+    }
+  }
+
+  Future<void> _saveModifier(DietaryModifier m) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKey, m.name);
+  }
 
   void _submit() {
+    _saveModifier(_modifier);
     context.push(
       '/recipe',
       extra: {
@@ -98,7 +123,10 @@ class _ConfirmScreenState extends State<ConfirmScreen> {
                   const SizedBox(height: 12),
                   DietaryToggleRow(
                     selected: _modifier,
-                    onChanged: (m) => setState(() => _modifier = m),
+                    onChanged: (m) {
+                      setState(() => _modifier = m);
+                      _saveModifier(m);
+                    },
                   ),
                   const SizedBox(height: 20),
                   SizedBox(

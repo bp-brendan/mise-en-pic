@@ -1,11 +1,14 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/config/motion_config.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
+import '../../../../core/utils/recipe_sharer.dart';
 import '../../../camera/domain/models/dietary_modifier.dart';
 import '../../data/gemini_service.dart';
 import '../../domain/models/recipe_result.dart';
@@ -43,10 +46,33 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
     final state = ref.watch(recipeNotifierProvider);
     final theme = Theme.of(context);
 
-    return Scaffold(
+    // If not food, show toast and go home.
+    ref.listen<RecipeState>(recipeNotifierProvider, (prev, next) {
+      if (next is RecipeNotFood) {
+        _showNotFoodToast(context, next.message);
+        context.go('/');
+      }
+    });
+
+    // Don't render anything if we're about to navigate away.
+    if (state is RecipeNotFood) {
+      return const Scaffold(backgroundColor: CookbookPalette.lightBackground);
+    }
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go('/');
+      },
+      child: Scaffold(
       backgroundColor: CookbookPalette.lightBackground,
       appBar: AppBar(
         backgroundColor: CookbookPalette.lightBackground,
+        // Back goes all the way home, not back through camera/confirm.
+        leading: IconButton(
+          onPressed: () => context.go('/'),
+          icon: const Icon(Icons.arrow_back),
+        ),
         title: Text(
           'Your Recipe',
           style: CookbookTheme.headlineStyle(
@@ -54,30 +80,53 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
           ),
         ),
         actions: [
-          if (state case RecipeSuccess(:final recipe)) ...[
-            Builder(builder: (context) {
-              return IconButton(
-                onPressed: () =>
-                    ref.read(recipeNotifierProvider.notifier).togglePin(),
-                icon: Icon(
-                  recipe.isPinned
-                      ? Icons.push_pin
-                      : Icons.push_pin_outlined,
-                  color: recipe.isPinned
-                      ? CookbookPalette.lightAccent
-                      : theme.colorScheme.onSurface,
-                ),
-              );
-            }),
+          if (state case RecipeSuccess(
+            :final recipe,
+            :final dishImage,
+            :final gridImage,
+          )) ...[
+            IconButton(
+              onPressed: () => RecipeSharer.share(
+                context: context,
+                recipe: recipe,
+                dishImage: dishImage,
+                gridImage: gridImage,
+                photoBytes: widget.imageBytes,
+              ),
+              icon: Icon(
+                Icons.ios_share,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+            IconButton(
+              onPressed: () =>
+                  ref.read(recipeNotifierProvider.notifier).togglePin(),
+              icon: Icon(
+                recipe.isPinned
+                    ? Icons.push_pin
+                    : Icons.push_pin_outlined,
+                color: recipe.isPinned
+                    ? CookbookPalette.lightAccent
+                    : theme.colorScheme.onSurface,
+              ),
+            ),
+            IconButton(
+              onPressed: () => _confirmDelete(context, ref, recipe),
+              icon: Icon(
+                Icons.delete_outline,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ),
           ],
         ],
       ),
       body: AnimatedSwitcher(
         duration: MotionConfig.routeTransition,
         switchInCurve: MotionConfig.routeCurve,
-        child: state.when(
-          loading: () => const _LoadingView(key: ValueKey('loading')),
-          error: (message) => _ErrorView(
+        child: switch (state) {
+          RecipeLoading() =>
+            const _LoadingView(key: ValueKey('loading')),
+          RecipeError(:final message) => _ErrorView(
             key: const ValueKey('error'),
             message: message,
             onRetry: () {
@@ -87,16 +136,58 @@ class _RecipeScreenState extends ConsumerState<RecipeScreen> {
                   );
             },
           ),
-          success: (recipe, dishImage, gridImage) => _CookbookPage(
-            key: const ValueKey('success'),
-            recipe: recipe,
-            photoBytes: widget.imageBytes,
-            dishImage: dishImage,
-            gridImage: gridImage,
+          RecipeSuccess(:final recipe, :final dishImage, :final gridImage, :final featuredIndices) =>
+            _CookbookPage(
+              key: const ValueKey('success'),
+              recipe: recipe,
+              dishImage: dishImage,
+              gridImage: gridImage,
+              featuredIndices: featuredIndices ?? [],
+            ),
+          RecipeNotFood() => const SizedBox.shrink(),
+        },
+      ),
+    ),
+    );
+  }
+
+  Future<void> _confirmDelete(
+      BuildContext context, WidgetRef ref, RecipeResult recipe) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete recipe?'),
+        content: Text('Remove "${recipe.dishName}" permanently?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete',
+                style: TextStyle(color: CookbookPalette.error)),
           ),
-        ),
+        ],
       ),
     );
+    if (confirmed == true && context.mounted) {
+      await ref.read(recipeRepositoryProvider).delete(recipe);
+      if (context.mounted) context.go('/');
+    }
+  }
+
+  void _showNotFoodToast(BuildContext context, String message) {
+    final overlay = Overlay.of(context);
+    late OverlayEntry entry;
+
+    entry = OverlayEntry(
+      builder: (_) => _NotFoodToast(
+        message: message,
+        onDismiss: () => entry.remove(),
+      ),
+    );
+
+    overlay.insert(entry);
   }
 }
 
@@ -167,15 +258,15 @@ class _CookbookPage extends StatelessWidget {
   const _CookbookPage({
     super.key,
     required this.recipe,
-    required this.photoBytes,
     this.dishImage,
     this.gridImage,
+    this.featuredIndices = const [],
   });
 
   final RecipeResult recipe;
-  final Uint8List photoBytes;
   final Uint8List? dishImage;
   final Uint8List? gridImage;
+  final List<int> featuredIndices;
 
   @override
   Widget build(BuildContext context) {
@@ -184,123 +275,107 @@ class _CookbookPage extends StatelessWidget {
     final steps = recipe.steps;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // ── Dish illustration (or photo fallback) ──
-          _DishHero(dishImage: dishImage, photoBytes: photoBytes),
-          const SizedBox(height: 24),
+          // ── Dish illustration — square, edge to edge ──
+          _DishHero(dishImage: dishImage),
 
-          // ── Dish title ──
-          Center(
-            child: Text(
-              recipe.dishName,
-              textAlign: TextAlign.center,
-              style: CookbookTheme.displayStyle(
-                fontSize: 34,
-                fontWeight: 760,
-                color: ink,
-              ).copyWith(shadows: CookbookTheme.letterpressShadows(ink)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 14),
+
+                // ── Meta row: prep time, cook time, servings, modifier ──
+                _MetaRow(recipe: recipe, ink: ink),
+
+                const SizedBox(height: 28),
+
+                // ── Ingredients ──
+                _SectionLabel(label: 'INGREDIENTS', ink: ink),
+                const SizedBox(height: 12),
+                ...recipe.ingredients.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final ing = entry.value;
+                  // Find this ingredient's position in the sprite grid (if featured).
+                  final spritePos = featuredIndices.indexOf(index);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 52,
+                          height: 52,
+                          child: gridImage != null && spritePos >= 0
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: _IngredientSprite(
+                                    gridImage: gridImage!,
+                                    index: spritePos,
+                                    totalItems: featuredIndices.length,
+                                  ),
+                                )
+                              : Center(
+                                  child: Text(ing.emoji,
+                                      style: const TextStyle(fontSize: 28)),
+                                ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(
+                              style: CookbookTheme.bodyStyle(
+                                  fontSize: 15, color: ink),
+                              children: [
+                                TextSpan(
+                                  text: '${ing.amount} ',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600),
+                                ),
+                                TextSpan(text: ing.name),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+
+                const SizedBox(height: 28),
+
+                // ── Method ──
+                _SectionLabel(label: 'METHOD', ink: ink),
+                const SizedBox(height: 16),
+                ...steps.asMap().entries.map((entry) {
+                  final stepIndex = entry.key;
+                  final stepText = entry.value;
+                  final matches =
+                      recipe.ingredientIndicesForStep(stepText);
+                  // Map ingredient index to featured sprite position.
+                  int? spritePos;
+                  for (final m in matches) {
+                    final pos = featuredIndices.indexOf(m);
+                    if (pos >= 0) { spritePos = pos; break; }
+                  }
+
+                  return _MethodStep(
+                    stepNumber: stepIndex + 1,
+                    text: stepText,
+                    ink: ink,
+                    gridImage: gridImage,
+                    spriteIndex: spritePos,
+                    totalIngredients: featuredIndices.length,
+                  );
+                }),
+
+                const SizedBox(height: 40),
+              ],
             ),
           ),
-          if (recipe.tagline.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Center(
-              child: Text(
-                recipe.tagline,
-                textAlign: TextAlign.center,
-                style: CookbookTheme.bodyStyle(
-                  fontSize: 14,
-                  fontWeight: 430,
-                  color: ink.withValues(alpha: 0.6),
-                ).copyWith(fontStyle: FontStyle.italic),
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-
-          // ── Meta row: prep time, cook time, servings, modifier ──
-          _MetaRow(recipe: recipe, ink: ink),
-
-          const SizedBox(height: 28),
-
-          // ── Ingredients ──
-          _SectionLabel(label: 'INGREDIENTS', ink: ink),
-          const SizedBox(height: 12),
-          ...recipe.ingredients.asMap().entries.map((entry) {
-            final index = entry.key;
-            final ing = entry.value;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 52,
-                    height: 52,
-                    child: gridImage != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: _IngredientSprite(
-                              gridImage: gridImage!,
-                              index: index,
-                              totalItems: recipe.ingredients.length,
-                            ),
-                          )
-                        : Center(
-                            child: Text(ing.emoji,
-                                style: const TextStyle(fontSize: 28)),
-                          ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: RichText(
-                      text: TextSpan(
-                        style:
-                            CookbookTheme.bodyStyle(fontSize: 15, color: ink),
-                        children: [
-                          TextSpan(
-                            text: '${ing.amount} ',
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          TextSpan(text: ing.name),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-
-          const SizedBox(height: 28),
-
-          // ── Method ──
-          _SectionLabel(label: 'METHOD', ink: ink),
-          const SizedBox(height: 16),
-          ...steps.asMap().entries.map((entry) {
-            final stepIndex = entry.key;
-            final stepText = entry.value;
-            final ingredientMatches =
-                recipe.ingredientIndicesForStep(stepText);
-            // Pick the first matched ingredient for illustration.
-            final spriteIndex =
-                ingredientMatches.isNotEmpty ? ingredientMatches.first : null;
-
-            return _MethodStep(
-              stepNumber: stepIndex + 1,
-              text: stepText,
-              ink: ink,
-              gridImage: gridImage,
-              spriteIndex: spriteIndex,
-              totalIngredients: recipe.ingredients.length,
-              layoutVariant: stepIndex % 3, // cycle through layouts
-            );
-          }),
-
-          const SizedBox(height: 40),
         ],
       ),
     );
@@ -319,7 +394,7 @@ class _MetaRow extends StatelessWidget {
     final chips = <Widget>[];
 
     if (recipe.prepTime.isNotEmpty) {
-      chips.add(_MetaChip(icon: Icons.content_cut, label: recipe.prepTime, ink: ink));
+      chips.add(_MetaChip(icon: Icons.restaurant, label: recipe.prepTime, ink: ink));
     }
     if (recipe.cookTime.isNotEmpty) {
       chips.add(_MetaChip(icon: Icons.local_fire_department, label: recipe.cookTime, ink: ink));
@@ -327,26 +402,31 @@ class _MetaRow extends StatelessWidget {
     if (recipe.servings.isNotEmpty) {
       chips.add(_MetaChip(icon: Icons.people_outline, label: 'Serves ${recipe.servings}', ink: ink));
     }
-    chips.add(
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: CookbookPalette.lightAccent.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(CookbookTheme.brutalRadius),
-          border: Border.all(
-            color: CookbookPalette.lightAccent.withValues(alpha: 0.3),
+    if (recipe.caloriesPerServing != null) {
+      chips.add(_MetaChip(icon: Icons.whatshot_outlined, label: '${recipe.caloriesPerServing} cal', ink: ink));
+    }
+    if (recipe.modifier != DietaryModifier.standard) {
+      chips.add(
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: CookbookPalette.lightAccent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(CookbookTheme.brutalRadius),
+            border: Border.all(
+              color: CookbookPalette.lightAccent.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Text(
+            recipe.modifier.label,
+            style: CookbookTheme.labelStyle(
+              fontSize: 10,
+              color: CookbookPalette.lightAccent,
+              letterSpacing: 1.8,
+            ),
           ),
         ),
-        child: Text(
-          recipe.modifier.label,
-          style: CookbookTheme.labelStyle(
-            fontSize: 10,
-            color: CookbookPalette.lightAccent,
-            letterSpacing: 1.8,
-          ),
-        ),
-      ),
-    );
+      );
+    }
 
     return Wrap(
       alignment: WrapAlignment.center,
@@ -401,7 +481,6 @@ class _MethodStep extends StatelessWidget {
     this.gridImage,
     this.spriteIndex,
     required this.totalIngredients,
-    required this.layoutVariant,
   });
 
   final int stepNumber;
@@ -410,142 +489,105 @@ class _MethodStep extends StatelessWidget {
   final Uint8List? gridImage;
   final int? spriteIndex;
   final int totalIngredients;
-  final int layoutVariant; // 0, 1, 2 — cycles through layouts
 
   @override
   Widget build(BuildContext context) {
     final hasSprite = gridImage != null && spriteIndex != null;
-    const spriteSize = 72.0;
-
-    final stepNumWidget = Text(
-      '$stepNumber',
-      style: CookbookTheme.displayStyle(
-        fontSize: 32,
-        fontWeight: 760,
-        color: ink.withValues(alpha: 0.1),
-      ),
-    );
-
-    final textWidget = Text(
-      text,
-      style: CookbookTheme.bodyStyle(
-        fontSize: 16,
-        color: ink,
-      ).copyWith(height: 1.55),
-    );
-
-    final spriteWidget = hasSprite
-        ? SizedBox(
-            width: spriteSize,
-            height: spriteSize,
-            child: _IngredientSprite(
-              gridImage: gridImage!,
-              index: spriteIndex!,
-              totalItems: totalIngredients,
-            ),
-          )
-        : null;
-
-    // Vary layout based on step for cookbook feel.
-    Widget content;
-    if (!hasSprite) {
-      // No sprite — simple layout with big step number.
-      content = Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 36, child: stepNumWidget),
-          const SizedBox(width: 8),
-          Expanded(child: textWidget),
-        ],
-      );
-    } else if (layoutVariant == 0) {
-      // Sprite on the right, text on the left.
-      content = Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 36, child: stepNumWidget),
-          const SizedBox(width: 8),
-          Expanded(child: textWidget),
-          const SizedBox(width: 8),
-          spriteWidget!,
-        ],
-      );
-    } else if (layoutVariant == 1) {
-      // Sprite on the left, text on the right.
-      content = Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          spriteWidget!,
-          const SizedBox(width: 8),
-          SizedBox(width: 36, child: stepNumWidget),
-          const SizedBox(width: 4),
-          Expanded(child: textWidget),
-        ],
-      );
-    } else {
-      // Sprite centered above the text.
-      content = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              SizedBox(width: 36, child: stepNumWidget),
-              const SizedBox(width: 12),
-              spriteWidget!,
-            ],
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.only(left: 44),
-            child: textWidget,
-          ),
-        ],
-      );
-    }
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
-      child: content,
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 32,
+            child: Text(
+              '$stepNumber',
+              style: CookbookTheme.displayStyle(
+                fontSize: 28,
+                fontWeight: 760,
+                color: ink.withValues(alpha: 0.1),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: CookbookTheme.bodyStyle(fontSize: 15, color: ink)
+                  .copyWith(height: 1.5),
+            ),
+          ),
+          if (hasSprite) ...[
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: _IngredientSprite(
+                gridImage: gridImage!,
+                index: spriteIndex!,
+                totalItems: totalIngredients,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
 
-// ── Dish hero with crossfade from photo to illustration ───────────
+// ── Dish hero — illustration or quirky loading placeholder ────────
 
 class _DishHero extends StatelessWidget {
-  const _DishHero({this.dishImage, required this.photoBytes});
+  const _DishHero({this.dishImage});
 
   final Uint8List? dishImage;
-  final Uint8List photoBytes;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedCrossFade(
-      duration: const Duration(milliseconds: 600),
-      crossFadeState: dishImage != null
-          ? CrossFadeState.showSecond
-          : CrossFadeState.showFirst,
-      firstCurve: Curves.easeOut,
-      secondCurve: Curves.easeOut,
-      firstChild: Image.memory(
-        photoBytes,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
+    final screenWidth = MediaQuery.of(context).size.width;
+
+    if (dishImage != null) {
+      return SizedBox(
+        width: screenWidth,
+        height: screenWidth, // square
+        child: Image.memory(
+          dishImage!,
+          fit: BoxFit.cover, // crop to fill the square
+          gaplessPlayback: true,
+        ),
+      );
+    }
+
+    // Quirky placeholder while illustration generates.
+    return SizedBox(
+      width: screenWidth,
+      height: screenWidth,
+      child: const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('🎨', style: TextStyle(fontSize: 48)),
+            SizedBox(height: 12),
+            Text(
+              'Painting your dish...',
+              style: TextStyle(
+                fontFamily: 'SourceSerif4',
+                fontSize: 14,
+                fontStyle: FontStyle.italic,
+                color: CookbookPalette.lightInk,
+              ),
+            ),
+          ],
+        ),
       ),
-      secondChild: dishImage != null
-          ? Image.memory(
-              dishImage!,
-              fit: BoxFit.contain,
-              gaplessPlayback: true,
-            )
-          : const SizedBox.shrink(),
     );
   }
 }
 
 // ── Ingredient sprite — crops one cell from the grid image ──────────
 
-class _IngredientSprite extends StatelessWidget {
+class _IngredientSprite extends StatefulWidget {
   const _IngredientSprite({
     required this.gridImage,
     required this.index,
@@ -557,39 +599,75 @@ class _IngredientSprite extends StatelessWidget {
   final int totalItems;
 
   @override
+  State<_IngredientSprite> createState() => _IngredientSpriteState();
+}
+
+class _IngredientSpriteState extends State<_IngredientSprite> {
+  ui.Image? _decoded;
+
+  @override
+  void initState() {
+    super.initState();
+    _decode();
+  }
+
+  @override
+  void didUpdateWidget(_IngredientSprite old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.gridImage, widget.gridImage)) _decode();
+  }
+
+  Future<void> _decode() async {
+    final codec = await ui.instantiateImageCodec(widget.gridImage);
+    final frame = await codec.getNextFrame();
+    if (mounted) setState(() => _decoded = frame.image);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_decoded == null) return const SizedBox.shrink();
+
     const cols = GeminiService.gridColumns;
-    final rows = (totalItems / cols).ceil();
-    final col = index % cols;
-    final row = index ~/ cols;
+    final rows = (widget.totalItems / cols).ceil();
+    final col = widget.index % cols;
+    final row = widget.index ~/ cols;
+
+    final cellW = _decoded!.width / cols;
+    final cellH = _decoded!.height / rows;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cellW = constraints.maxWidth;
-        final cellH = constraints.maxHeight;
-        final fullW = cellW * cols;
-        final fullH = cellH * rows;
-
-        return ClipRect(
-          child: OverflowBox(
-            alignment: Alignment.topLeft,
-            maxWidth: fullW,
-            maxHeight: fullH,
-            child: Transform.translate(
-              offset: Offset(-col * cellW, -row * cellH),
-              child: Image.memory(
-                gridImage,
-                width: fullW,
-                height: fullH,
-                fit: BoxFit.fill,
-                gaplessPlayback: true,
-              ),
-            ),
+        return CustomPaint(
+          size: Size(constraints.maxWidth, constraints.maxHeight),
+          painter: _SpritePainter(
+            image: _decoded!,
+            srcRect: Rect.fromLTWH(
+                col * cellW, row * cellH, cellW, cellH),
           ),
         );
       },
     );
   }
+}
+
+class _SpritePainter extends CustomPainter {
+  _SpritePainter({required this.image, required this.srcRect});
+  final ui.Image image;
+  final Rect srcRect;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawImageRect(
+      image,
+      srcRect,
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SpritePainter old) =>
+      old.image != image || old.srcRect != srcRect;
 }
 
 // ── Section label ─────────────────────────────────────────────────
@@ -627,6 +705,106 @@ class _SectionLabel extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── Not-food toast — auto-dismisses, hold to keep ───────────────
+
+class _NotFoodToast extends StatefulWidget {
+  const _NotFoodToast({required this.message, required this.onDismiss});
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_NotFoodToast> createState() => _NotFoodToastState();
+}
+
+class _NotFoodToastState extends State<_NotFoodToast>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _fadeController;
+  bool _held = false;
+  bool _dismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    )..value = 0.0;
+
+    // Fade in.
+    _fadeController.forward();
+
+    // Start auto-dismiss timer.
+    _startDismissTimer();
+  }
+
+  void _startDismissTimer() {
+    Future.delayed(const Duration(seconds: 4), () {
+      if (mounted && !_held && !_dismissed) _dismiss();
+    });
+  }
+
+  void _dismiss() {
+    if (_dismissed) return;
+    _dismissed = true;
+    _fadeController.reverse().then((_) {
+      if (mounted) widget.onDismiss();
+    });
+  }
+
+  @override
+  void dispose() {
+    _fadeController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+
+    return Positioned(
+      left: 20,
+      right: 20,
+      bottom: bottomPadding + 24,
+      child: FadeTransition(
+        opacity: _fadeController,
+        child: GestureDetector(
+          onLongPressStart: (_) => setState(() => _held = true),
+          onLongPressEnd: (_) {
+            setState(() => _held = false);
+            // Dismiss shortly after release.
+            Future.delayed(const Duration(seconds: 2), () {
+              if (mounted && !_held && !_dismissed) _dismiss();
+            });
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: CookbookPalette.lightInk.withValues(alpha: 0.92),
+              borderRadius:
+                  BorderRadius.circular(CookbookTheme.brutalRadius * 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Text(
+              widget.message,
+              textAlign: TextAlign.center,
+              style: CookbookTheme.bodyStyle(
+                fontSize: 15,
+                color: CookbookPalette.lightCard,
+              ).copyWith(height: 1.4),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

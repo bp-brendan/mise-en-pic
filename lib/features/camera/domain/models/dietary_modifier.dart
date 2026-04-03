@@ -1,6 +1,6 @@
 /// Dietary modifiers presented after photo capture.
 ///
-/// [vegan] is the default selection per product spec.
+/// [standard] is the default selection.
 enum DietaryModifier {
   standard('Standard'),
   vegan('Vegan'),

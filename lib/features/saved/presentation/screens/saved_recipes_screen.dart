@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../camera/domain/models/dietary_modifier.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
 import '../../../../core/widgets/letterpress_card.dart';
@@ -24,7 +25,10 @@ class SavedRecipesScreen extends ConsumerStatefulWidget {
 
 class _SavedRecipesScreenState extends ConsumerState<SavedRecipesScreen> {
   List<RecipeResult> _recipes = [];
+  List<RecipeResult> _filtered = [];
   bool _loading = true;
+  String _query = '';
+  bool _searching = false;
 
   @override
   void initState() {
@@ -34,27 +38,75 @@ class _SavedRecipesScreenState extends ConsumerState<SavedRecipesScreen> {
 
   Future<void> _load() async {
     final recipes = await ref.read(recipeRepositoryProvider).loadAll();
-    if (mounted) setState(() { _recipes = recipes; _loading = false; });
+    if (mounted) {
+      setState(() {
+        _recipes = recipes;
+        _filtered = _applyFilter(recipes);
+        _loading = false;
+      });
+    }
   }
 
-  Future<void> _togglePin(int index) async {
+  List<RecipeResult> _applyFilter(List<RecipeResult> recipes) {
+    if (_query.isEmpty) return recipes;
+    final q = _query.toLowerCase();
+    return recipes.where((r) {
+      return r.dishName.toLowerCase().contains(q) ||
+          r.tagline.toLowerCase().contains(q) ||
+          r.ingredients.any((i) => i.name.toLowerCase().contains(q));
+    }).toList();
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() {
+      _query = value;
+      _filtered = _applyFilter(_recipes);
+    });
+  }
+
+  Future<void> _togglePin(int filteredIndex) async {
+    final recipe = _filtered[filteredIndex];
     final repo = ref.read(recipeRepositoryProvider);
-    await repo.togglePin(_recipes[index]);
+    await repo.togglePin(recipe);
     HapticFeedback.selectionClick();
-    final recipes = await repo.loadAll();
-    if (mounted) setState(() => _recipes = recipes);
+    await _load();
   }
 
-  Future<void> _deleteRecipe(int index) async {
-    final recipe = _recipes[index];
+  Future<void> _deleteRecipe(int filteredIndex) async {
+    final recipe = _filtered[filteredIndex];
     final repo = ref.read(recipeRepositoryProvider);
-    setState(() => _recipes.removeAt(index));
+    setState(() {
+      _recipes.remove(recipe);
+      _filtered = _applyFilter(_recipes);
+    });
     await repo.delete(recipe);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${recipe.dishName} burned')),
       );
     }
+  }
+
+  Future<void> _confirmDelete(int filteredIndex) async {
+    final recipe = _filtered[filteredIndex];
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete recipe?'),
+        content: Text('Remove "${recipe.dishName}" permanently?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete',
+                style: TextStyle(color: CookbookPalette.error)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) _deleteRecipe(filteredIndex);
   }
 
   @override
@@ -64,25 +116,63 @@ class _SavedRecipesScreenState extends ConsumerState<SavedRecipesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Saved Recipes',
-          style: CookbookTheme.headlineStyle(color: ink),
-        ),
+        title: _searching
+            ? TextField(
+                autofocus: true,
+                onChanged: _onSearchChanged,
+                style: CookbookTheme.bodyStyle(fontSize: 16, color: ink),
+                decoration: InputDecoration(
+                  hintText: 'Search recipes...',
+                  hintStyle: CookbookTheme.bodyStyle(
+                      fontSize: 16, color: ink.withValues(alpha: 0.35)),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              )
+            : Text(
+                'Saved Recipes',
+                style: CookbookTheme.headlineStyle(color: ink),
+              ),
+        actions: [
+          IconButton(
+            onPressed: () {
+              setState(() {
+                _searching = !_searching;
+                if (!_searching) {
+                  _query = '';
+                  _filtered = _applyFilter(_recipes);
+                }
+              });
+            },
+            icon: Icon(_searching ? Icons.close : Icons.search, color: ink),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _recipes.isEmpty
+          : _filtered.isEmpty
               ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text('📖', style: TextStyle(fontSize: 48)),
+                      Text(_query.isEmpty ? '📖' : '🔍',
+                          style: const TextStyle(fontSize: 48)),
                       const SizedBox(height: 16),
-                      Text('No saved recipes yet',
+                      Text(
+                          _query.isEmpty
+                              ? 'No saved recipes yet'
+                              : 'No matches',
                           style: CookbookTheme.titleStyle(
                               color: ink.withValues(alpha: 0.5))),
                       const SizedBox(height: 6),
-                      Text('Snap a dish and it will appear here',
+                      Text(
+                          _query.isEmpty
+                              ? 'Snap a dish and it will appear here'
+                              : 'Try a different search',
                           style: CookbookTheme.bodyStyle(
                               fontSize: 13,
                               color: ink.withValues(alpha: 0.35))),
@@ -91,9 +181,9 @@ class _SavedRecipesScreenState extends ConsumerState<SavedRecipesScreen> {
                 )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                  itemCount: _recipes.length,
+                  itemCount: _filtered.length,
                   itemBuilder: (context, index) {
-                    final recipe = _recipes[index];
+                    final recipe = _filtered[index];
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 14),
                       child: _BurnDismissible(
@@ -109,6 +199,7 @@ class _SavedRecipesScreenState extends ConsumerState<SavedRecipesScreen> {
                             _load();
                           },
                           onTogglePin: () => _togglePin(index),
+                          onLongPress: () => _confirmDelete(index),
                         ),
                       ),
                     );
@@ -126,12 +217,14 @@ class _RecipeCard extends StatelessWidget {
     required this.ink,
     required this.onTap,
     required this.onTogglePin,
+    this.onLongPress,
   });
 
   final RecipeResult recipe;
   final Color ink;
   final VoidCallback onTap;
   final VoidCallback onTogglePin;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -139,6 +232,7 @@ class _RecipeCard extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: LetterpressCard(
         padding: EdgeInsets.zero,
         lift: 0.5,
@@ -209,23 +303,24 @@ class _RecipeCard extends StatelessWidget {
                                     ],
                                   ),
                                 ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: CookbookPalette.lightAccent
-                                      .withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  recipe.modifier.label,
-                                  style: CookbookTheme.labelStyle(
-                                    fontSize: 9,
-                                    color: CookbookPalette.lightAccent,
-                                    letterSpacing: 1.2,
+                              if (recipe.modifier != DietaryModifier.standard)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: CookbookPalette.lightAccent
+                                        .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    recipe.modifier.label,
+                                    style: CookbookTheme.labelStyle(
+                                      fontSize: 9,
+                                      color: CookbookPalette.lightAccent,
+                                      letterSpacing: 1.2,
+                                    ),
                                   ),
                                 ),
-                              ),
                             ],
                           ),
                           if (recipe.tagline.isNotEmpty) ...[

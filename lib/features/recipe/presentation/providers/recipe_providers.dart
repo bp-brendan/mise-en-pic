@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/utils/image_post_processor.dart';
 import '../../../camera/domain/models/dietary_modifier.dart';
 import '../../data/gemini_service.dart';
 import '../../data/recipe_repository.dart';
@@ -25,25 +26,6 @@ final recipeRepositoryProvider = Provider<RecipeRepository>((ref) {
 
 sealed class RecipeState {
   const RecipeState();
-
-  T when<T>({
-    required T Function() loading,
-    required T Function(String message) error,
-    required T Function(RecipeResult recipe, Uint8List? dishImage,
-            Uint8List? gridImage)
-        success,
-  }) {
-    return switch (this) {
-      RecipeLoading() => loading(),
-      RecipeError(message: final m) => error(m),
-      RecipeSuccess(
-        recipe: final r,
-        dishImage: final d,
-        gridImage: final g,
-      ) =>
-        success(r, d, g),
-    };
-  }
 }
 
 class RecipeLoading extends RecipeState {
@@ -55,11 +37,19 @@ class RecipeError extends RecipeState {
   final String message;
 }
 
+/// The image wasn't food — carries a witty message from the model.
+class RecipeNotFood extends RecipeState {
+  const RecipeNotFood(this.message);
+  final String message;
+}
+
 class RecipeSuccess extends RecipeState {
-  const RecipeSuccess(this.recipe, {this.dishImage, this.gridImage});
+  const RecipeSuccess(this.recipe, {this.dishImage, this.gridImage, this.featuredIndices});
   final RecipeResult recipe;
   final Uint8List? dishImage;
   final Uint8List? gridImage;
+  /// Indices into recipe.ingredients that have sprites in the grid image.
+  final List<int>? featuredIndices;
 }
 
 // ── Notifier ──────────────────────────────────────────────────────
@@ -85,6 +75,9 @@ class RecipeNotifier extends StateNotifier<RecipeState> {
         imageBytes: imageBytes,
         modifier: modifier,
       );
+    } on NotFoodException catch (e) {
+      state = RecipeNotFood(e.message);
+      return;
     } catch (e) {
       state = RecipeError(e.toString());
       return;
@@ -97,17 +90,20 @@ class RecipeNotifier extends StateNotifier<RecipeState> {
       // Save failure shouldn't block the UI.
     }
 
-    // Show recipe text immediately while images generate.
-    state = RecipeSuccess(recipe);
+    // Compute which ingredients get sprites.
+    final featured = GeminiService.featuredIndices(recipe.ingredients);
 
-    // Call 2: Generate illustrations in parallel.
-    final results = await Future.wait([
-      _service.generateDishIllustration(recipe).catchError((_) => null),
-      _service.generateIngredientsGrid(recipe).catchError((_) => null),
-    ]);
+    // Show recipe text immediately while image generates.
+    state = RecipeSuccess(recipe, featuredIndices: featured);
 
-    final dishImage = results[0];
-    final gridImage = results[1];
+    // Call 2: Separate dish hero + ingredient grid images.
+    Uint8List? dishImage;
+    Uint8List? gridImage;
+    try {
+      final (dish, grid) = await _service.generateRecipeIllustration(recipe);
+      if (dish != null) dishImage = await ImagePostProcessor.fixBackground(dish);
+      if (grid != null) gridImage = await ImagePostProcessor.fixBackground(grid);
+    } catch (_) {}
 
     // Re-save with images now included.
     if (dishImage != null || gridImage != null) {
@@ -125,7 +121,7 @@ class RecipeNotifier extends StateNotifier<RecipeState> {
 
     // Update state with images.
     if (mounted) {
-      state = RecipeSuccess(recipe, dishImage: dishImage, gridImage: gridImage);
+      state = RecipeSuccess(recipe, dishImage: dishImage, gridImage: gridImage, featuredIndices: featured);
     }
   }
 
@@ -139,6 +135,7 @@ class RecipeNotifier extends StateNotifier<RecipeState> {
         updated,
         dishImage: current.dishImage,
         gridImage: current.gridImage,
+        featuredIndices: current.featuredIndices,
       );
     } catch (_) {}
   }

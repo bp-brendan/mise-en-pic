@@ -1,19 +1,38 @@
+import 'dart:async';
+
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app_router.dart';
+import 'core/purchases/revenue_cat_providers.dart';
 import 'core/theme/cookbook_theme.dart';
 import 'core/widgets/paper_texture.dart';
+import 'firebase_options.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() async {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  SystemChrome.setSystemUIOverlayStyle(CookbookTheme.edgeToEdgeLight);
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
-  runApp(const ProviderScope(child: MiseEnPicApp()));
+    // Send all Flutter errors to Crashlytics.
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(CookbookTheme.edgeToEdgeLight);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+    await configureRevenueCat();
+
+    runApp(const ProviderScope(child: MiseEnPicApp()));
+  }, (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+  });
 }
 
 class MiseEnPicApp extends StatelessWidget {

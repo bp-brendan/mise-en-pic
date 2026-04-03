@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../../core/purchases/revenue_cat_providers.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
 import '../../../../core/widgets/tactile_button.dart';
 
 /// Front page with three entry points: camera, gallery, saved recipes.
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   Future<void> _pickFromGallery(BuildContext context) async {
@@ -23,9 +25,10 @@ class HomeScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final ink = theme.colorScheme.onSurface;
+    final isPro = ref.watch(isProProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -33,6 +36,19 @@ class HomeScreen extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             children: [
+              // Pro badge / settings row
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  icon: Icon(
+                    isPro ? Icons.settings_outlined : Icons.workspace_premium_outlined,
+                    color: isPro ? ink.withValues(alpha: 0.5) : CookbookPalette.lightAccent,
+                  ),
+                  tooltip: isPro ? 'Manage subscription' : 'Upgrade to Pro',
+                  onPressed: () => isPro ? showCustomerCenter() : showPaywall(),
+                ),
+              ),
+
               const Spacer(flex: 2),
 
               // Logo / title area
