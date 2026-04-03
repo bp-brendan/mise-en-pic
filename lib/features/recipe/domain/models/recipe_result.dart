@@ -42,6 +42,9 @@ class RecipeResult {
     required this.modifier,
     required this.ingredients,
     required this.method,
+    this.prepTime = '',
+    this.cookTime = '',
+    this.servings = '',
     this.imagePath,
     this.dishImagePath,
     this.gridImagePath,
@@ -52,6 +55,9 @@ class RecipeResult {
   final DietaryModifier modifier;
   final List<Ingredient> ingredients;
   final String method;
+  final String prepTime;
+  final String cookTime;
+  final String servings;
 
   /// Path to the original camera photo on disk.
   final String? imagePath;
@@ -61,6 +67,32 @@ class RecipeResult {
 
   /// Path to the AI-generated ingredients grid illustration.
   final String? gridImagePath;
+
+  /// Parse the method string into individual numbered steps.
+  List<String> get steps {
+    // Split on patterns like "1.", "2.", etc. at the start of a line or after newline.
+    final raw = method.split(RegExp(r'\n?\d+\.\s*'));
+    return raw.where((s) => s.trim().isNotEmpty).map((s) => s.trim()).toList();
+  }
+
+  /// For a given step, find which ingredient indices are mentioned in it.
+  List<int> ingredientIndicesForStep(String stepText) {
+    final lower = stepText.toLowerCase();
+    final matches = <int>[];
+    for (var i = 0; i < ingredients.length; i++) {
+      final name = ingredients[i].name.toLowerCase();
+      // Match on the main word (skip very short names like "oil" to avoid false positives)
+      if (name.length > 3 && lower.contains(name)) {
+        matches.add(i);
+      } else if (name.length <= 3) {
+        // For short names, require word boundary
+        if (RegExp('\\b${RegExp.escape(name)}\\b').hasMatch(lower)) {
+          matches.add(i);
+        }
+      }
+    }
+    return matches;
+  }
 
   factory RecipeResult.fromJson(Map<String, dynamic> json) {
     return RecipeResult(
@@ -75,6 +107,9 @@ class RecipeResult {
               .toList() ??
           [],
       method: json['method'] as String? ?? '',
+      prepTime: json['prepTime'] as String? ?? '',
+      cookTime: json['cookTime'] as String? ?? '',
+      servings: json['servings'] as String? ?? '',
       imagePath: json['imagePath'] as String?,
       dishImagePath: json['dishImagePath'] as String?,
       gridImagePath: json['gridImagePath'] as String?,
@@ -87,6 +122,9 @@ class RecipeResult {
         'modifier': modifier.name,
         'ingredients': ingredients.map((e) => e.toJson()).toList(),
         'method': method,
+        'prepTime': prepTime,
+        'cookTime': cookTime,
+        'servings': servings,
         'imagePath': imagePath,
         'dishImagePath': dishImagePath,
         'gridImagePath': gridImagePath,
@@ -103,6 +141,9 @@ class RecipeResult {
         modifier: modifier,
         ingredients: ingredients,
         method: method,
+        prepTime: prepTime,
+        cookTime: cookTime,
+        servings: servings,
         imagePath: imagePath ?? this.imagePath,
         dishImagePath: dishImagePath ?? this.dishImagePath,
         gridImagePath: gridImagePath ?? this.gridImagePath,

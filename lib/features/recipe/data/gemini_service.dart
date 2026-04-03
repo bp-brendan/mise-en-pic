@@ -29,12 +29,18 @@ class GeminiService {
   final GeminiImageClient _imageClient;
 
   // ── Style anchor (shared across all image prompts) ────────────
+  // Background color must match CookbookPalette.lightBackground (#E8EFE6)
+  // so illustrations blend seamlessly onto the app page.
+  static const _bgColor = '#E8EFE6';
+
   static const _styleAnchor =
       'Hand-painted watercolor and ink illustration style, like a personal '
       'culinary sketchbook or illustrated recipe journal. Bold confident ink '
       'outlines with vibrant saturated watercolor fills. Slightly naive, '
       'charming, folk-art quality — each item has personality and character. '
-      'Warm, inviting colors. TRANSPARENT BACKGROUND (no paper, no backdrop). '
+      'Warm, inviting colors. FLAT SOLID BACKGROUND COLOR: exactly $_bgColor '
+      '(a muted sage green). Fill the entire background with this single flat '
+      'color — no paper texture, no shadows, no checkerboard, no white. '
       'NO photorealism, NO 3D rendering, NO flat vector art, NO digital look, '
       'NO gradients. Think hand-painted gouache and ink recipe zine.';
 
@@ -74,12 +80,15 @@ class GeminiService {
       'Always give your best specific match — never refuse.\n'
       'Diet: ${modifier.label}.\n'
       'Return JSON: {"dishName":"CAPS NAME","tagline":"one line",'
+      '"prepTime":"20 min","cookTime":"35 min","servings":"4",'
       '"ingredients":[{"emoji":"🧈","amount":"2 tbsp","name":"unsalted butter",'
       '"visual":"a golden slab, slightly soft"}],'
-      '"method":"Detailed step-by-step with sensory cues and technique reasoning."}\n'
-      '8-15 ingredients with exact amounts. Method: a single string of '
-      '10-16 numbered steps, each 1-2 lines max. Concise and action-oriented '
-      'with inline sensory cues. Adjust all for ${modifier.label} diet.',
+      '"method":"1. First step... 2. Second step..."}\n'
+      '8-15 ingredients with exact amounts. Include prepTime, cookTime, and '
+      'servings. Method: a single string of 10-16 numbered steps, each 1-2 '
+      'lines max. Concise and action-oriented with inline sensory cues. '
+      'Reference specific ingredient names in each step so they can be '
+      'linked. Adjust all for ${modifier.label} diet.',
     );
 
     // Downscale for API — saves input tokens while display stays crisp.
@@ -120,7 +129,8 @@ class GeminiService {
         'colorful bowl or plate, viewed from a slight angle. Confident thick '
         'ink outlines, saturated watercolor/gouache fills, warm and inviting. '
         'The dish should look delicious and have personality. '
-        'TRANSPARENT BACKGROUND — the subject floats with no backdrop. '
+        'Background must be FLAT SOLID $_bgColor (muted sage green) — '
+        'no texture, no shadows, no other colors in the background area. '
         '$_styleAnchor';
 
     return _imageClient.generateImage(
@@ -128,8 +138,8 @@ class GeminiService {
       systemInstruction:
           'You are an illustrator for a personal hand-painted recipe journal. '
           'Bold ink outlines, vibrant gouache/watercolor fills, charming and '
-          'slightly naive folk-art style. TRANSPARENT/CLEAR background — '
-          'no paper, no backdrop, the illustration floats on nothing. '
+          'slightly naive folk-art style. The ENTIRE background must be filled '
+          'with flat solid color $_bgColor (muted sage green). '
           'No text, no labels, no words — just the dish illustration.',
     );
   }
@@ -162,8 +172,8 @@ class GeminiService {
         '- NO labels, NO text, NO numbers — just the illustrations.\n'
         '- Even spacing, uniform cell sizes, clean separation between cells.\n'
         '- If there are fewer items than cells in the last row, leave the '
-        'remaining cells empty/transparent.\n'
-        '- TRANSPARENT BACKGROUND — no paper, no backdrop.\n'
+        'remaining cells empty (filled with $_bgColor).\n'
+        '- ENTIRE background must be flat solid $_bgColor (muted sage green).\n'
         '- Use the SAME illustration style you would use for the finished '
         'dish — these ingredients should look like they belong together.\n'
         '$_styleAnchor';
@@ -175,7 +185,8 @@ class GeminiService {
           'Bold ink outlines, vibrant gouache/watercolor fills, charming and '
           'slightly naive folk-art style. Each ingredient must be large, '
           'centered in its grid cell, and clearly recognizable. '
-          'TRANSPARENT/CLEAR background. NO text or labels anywhere.',
+          'ENTIRE background must be flat solid color $_bgColor (muted sage '
+          'green). NO text or labels anywhere.',
     );
   }
 

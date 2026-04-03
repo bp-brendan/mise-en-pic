@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/config/motion_config.dart';
 import '../../../../core/theme/cookbook_palette.dart';
 import '../../../../core/theme/cookbook_theme.dart';
-import '../../../../core/widgets/letterpress_card.dart';
 import '../../../camera/domain/models/dietary_modifier.dart';
 import '../../data/gemini_service.dart';
 import '../../domain/models/recipe_result.dart';
@@ -187,6 +186,7 @@ class _CookbookPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final ink = theme.colorScheme.onSurface;
+    final steps = recipe.steps;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -194,16 +194,7 @@ class _CookbookPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // ── Dish illustration (or photo fallback) ──
-          LetterpressCard(
-            padding: const EdgeInsets.all(6),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: _DishHero(
-                dishImage: dishImage,
-                photoBytes: photoBytes,
-              ),
-            ),
-          ),
+          _DishHero(dishImage: dishImage, photoBytes: photoBytes),
           const SizedBox(height: 24),
 
           // ── Dish title ──
@@ -215,9 +206,7 @@ class _CookbookPage extends StatelessWidget {
                 fontSize: 34,
                 fontWeight: 760,
                 color: ink,
-              ).copyWith(
-                shadows: CookbookTheme.letterpressShadows(ink),
-              ),
+              ).copyWith(shadows: CookbookTheme.letterpressShadows(ink)),
             ),
           ),
           if (recipe.tagline.isNotEmpty) ...[
@@ -234,32 +223,14 @@ class _CookbookPage extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(height: 8),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-              decoration: BoxDecoration(
-                color: CookbookPalette.lightAccent.withValues(alpha: 0.12),
-                borderRadius:
-                    BorderRadius.circular(CookbookTheme.brutalRadius),
-                border: Border.all(
-                  color: CookbookPalette.lightAccent.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Text(
-                recipe.modifier.label,
-                style: CookbookTheme.labelStyle(
-                  fontSize: 10,
-                  color: CookbookPalette.lightAccent,
-                  letterSpacing: 1.8,
-                ),
-              ),
-            ),
-          ),
+          const SizedBox(height: 10),
+
+          // ── Meta row: prep time, cook time, servings, modifier ──
+          _MetaRow(recipe: recipe, ink: ink),
 
           const SizedBox(height: 28),
 
-          // ── Ingredients with inline sprite illustrations ──
+          // ── Ingredients ──
           _SectionLabel(label: 'INGREDIENTS', ink: ink),
           const SizedBox(height: 12),
           ...recipe.ingredients.asMap().entries.map((entry) {
@@ -270,7 +241,6 @@ class _CookbookPage extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Sprite crop from grid, or emoji fallback
                   SizedBox(
                     width: 52,
                     height: 52,
@@ -293,7 +263,7 @@ class _CookbookPage extends StatelessWidget {
                     child: RichText(
                       text: TextSpan(
                         style:
-                            CookbookTheme.bodyStyle(fontSize: 13, color: ink),
+                            CookbookTheme.bodyStyle(fontSize: 15, color: ink),
                         children: [
                           TextSpan(
                             text: '${ing.amount} ',
@@ -314,19 +284,233 @@ class _CookbookPage extends StatelessWidget {
 
           // ── Method ──
           _SectionLabel(label: 'METHOD', ink: ink),
-          const SizedBox(height: 12),
-          LetterpressCard(
-            padding: const EdgeInsets.all(16),
-            lift: 0.3,
-            child: Text(
-              recipe.method,
-              style: CookbookTheme.bodyStyle(fontSize: 14, color: ink),
-            ),
-          ),
+          const SizedBox(height: 16),
+          ...steps.asMap().entries.map((entry) {
+            final stepIndex = entry.key;
+            final stepText = entry.value;
+            final ingredientMatches =
+                recipe.ingredientIndicesForStep(stepText);
+            // Pick the first matched ingredient for illustration.
+            final spriteIndex =
+                ingredientMatches.isNotEmpty ? ingredientMatches.first : null;
+
+            return _MethodStep(
+              stepNumber: stepIndex + 1,
+              text: stepText,
+              ink: ink,
+              gridImage: gridImage,
+              spriteIndex: spriteIndex,
+              totalIngredients: recipe.ingredients.length,
+              layoutVariant: stepIndex % 3, // cycle through layouts
+            );
+          }),
 
           const SizedBox(height: 40),
         ],
       ),
+    );
+  }
+}
+
+// ── Meta row ─────────────────────────────────────────────────────
+
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({required this.recipe, required this.ink});
+  final RecipeResult recipe;
+  final Color ink;
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[];
+
+    if (recipe.prepTime.isNotEmpty) {
+      chips.add(_MetaChip(icon: Icons.content_cut, label: recipe.prepTime, ink: ink));
+    }
+    if (recipe.cookTime.isNotEmpty) {
+      chips.add(_MetaChip(icon: Icons.local_fire_department, label: recipe.cookTime, ink: ink));
+    }
+    if (recipe.servings.isNotEmpty) {
+      chips.add(_MetaChip(icon: Icons.people_outline, label: 'Serves ${recipe.servings}', ink: ink));
+    }
+    chips.add(
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: CookbookPalette.lightAccent.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(CookbookTheme.brutalRadius),
+          border: Border.all(
+            color: CookbookPalette.lightAccent.withValues(alpha: 0.3),
+          ),
+        ),
+        child: Text(
+          recipe.modifier.label,
+          style: CookbookTheme.labelStyle(
+            fontSize: 10,
+            color: CookbookPalette.lightAccent,
+            letterSpacing: 1.8,
+          ),
+        ),
+      ),
+    );
+
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 8,
+      runSpacing: 6,
+      children: chips,
+    );
+  }
+}
+
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({required this.icon, required this.label, required this.ink});
+  final IconData icon;
+  final String label;
+  final Color ink;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: ink.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(CookbookTheme.brutalRadius),
+        border: Border.all(color: ink.withValues(alpha: 0.12)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: ink.withValues(alpha: 0.5)),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: CookbookTheme.labelStyle(
+              fontSize: 11,
+              color: ink.withValues(alpha: 0.6),
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Method step with ingredient illustration ─────────────────────
+
+class _MethodStep extends StatelessWidget {
+  const _MethodStep({
+    required this.stepNumber,
+    required this.text,
+    required this.ink,
+    this.gridImage,
+    this.spriteIndex,
+    required this.totalIngredients,
+    required this.layoutVariant,
+  });
+
+  final int stepNumber;
+  final String text;
+  final Color ink;
+  final Uint8List? gridImage;
+  final int? spriteIndex;
+  final int totalIngredients;
+  final int layoutVariant; // 0, 1, 2 — cycles through layouts
+
+  @override
+  Widget build(BuildContext context) {
+    final hasSprite = gridImage != null && spriteIndex != null;
+    const spriteSize = 72.0;
+
+    final stepNumWidget = Text(
+      '$stepNumber',
+      style: CookbookTheme.displayStyle(
+        fontSize: 32,
+        fontWeight: 760,
+        color: ink.withValues(alpha: 0.1),
+      ),
+    );
+
+    final textWidget = Text(
+      text,
+      style: CookbookTheme.bodyStyle(
+        fontSize: 16,
+        color: ink,
+      ).copyWith(height: 1.55),
+    );
+
+    final spriteWidget = hasSprite
+        ? SizedBox(
+            width: spriteSize,
+            height: spriteSize,
+            child: _IngredientSprite(
+              gridImage: gridImage!,
+              index: spriteIndex!,
+              totalItems: totalIngredients,
+            ),
+          )
+        : null;
+
+    // Vary layout based on step for cookbook feel.
+    Widget content;
+    if (!hasSprite) {
+      // No sprite — simple layout with big step number.
+      content = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 36, child: stepNumWidget),
+          const SizedBox(width: 8),
+          Expanded(child: textWidget),
+        ],
+      );
+    } else if (layoutVariant == 0) {
+      // Sprite on the right, text on the left.
+      content = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 36, child: stepNumWidget),
+          const SizedBox(width: 8),
+          Expanded(child: textWidget),
+          const SizedBox(width: 8),
+          spriteWidget!,
+        ],
+      );
+    } else if (layoutVariant == 1) {
+      // Sprite on the left, text on the right.
+      content = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          spriteWidget!,
+          const SizedBox(width: 8),
+          SizedBox(width: 36, child: stepNumWidget),
+          const SizedBox(width: 4),
+          Expanded(child: textWidget),
+        ],
+      );
+    } else {
+      // Sprite centered above the text.
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(width: 36, child: stepNumWidget),
+              const SizedBox(width: 12),
+              spriteWidget!,
+            ],
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 44),
+            child: textWidget,
+          ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: content,
     );
   }
 }
@@ -384,22 +568,31 @@ class _IngredientSprite extends StatelessWidget {
     final col = index % cols;
     final row = index ~/ cols;
 
-    // Alignment maps: -1 = left/top edge, +1 = right/bottom edge.
-    // For a grid of N cells, cell i maps to: -1 + 2*i/(N-1)
-    final ax = cols > 1 ? -1.0 + 2.0 * col / (cols - 1) : 0.0;
-    final ay = rows > 1 ? -1.0 + 2.0 * row / (rows - 1) : 0.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cellW = constraints.maxWidth;
+        final cellH = constraints.maxHeight;
+        final fullW = cellW * cols;
+        final fullH = cellH * rows;
 
-    return ClipRect(
-      child: Align(
-        alignment: Alignment(ax, ay),
-        widthFactor: 1.0 / cols,
-        heightFactor: 1.0 / rows,
-        child: Image.memory(
-          gridImage,
-          fit: BoxFit.contain,
-          gaplessPlayback: true,
-        ),
-      ),
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topLeft,
+            maxWidth: fullW,
+            maxHeight: fullH,
+            child: Transform.translate(
+              offset: Offset(-col * cellW, -row * cellH),
+              child: Image.memory(
+                gridImage,
+                width: fullW,
+                height: fullH,
+                fit: BoxFit.fill,
+                gaplessPlayback: true,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
