@@ -226,22 +226,18 @@ class _SavedIngredientSprite extends StatelessWidget {
     final col = index % cols;
     final row = index ~/ cols;
 
+    final ax = cols > 1 ? -1.0 + 2.0 * col / (cols - 1) : 0.0;
+    final ay = rows > 1 ? -1.0 + 2.0 * row / (rows - 1) : 0.0;
+
     return ClipRect(
-      child: OverflowBox(
-        maxWidth: double.infinity,
-        maxHeight: double.infinity,
-        alignment: Alignment.topLeft,
-        child: FractionalTranslation(
-          translation: Offset(-col.toDouble(), -row.toDouble()),
-          child: SizedBox(
-            width: 52.0 * cols,
-            height: 52.0 * rows,
-            child: Image.memory(
-              gridImage,
-              fit: BoxFit.fill,
-              gaplessPlayback: true,
-            ),
-          ),
+      child: Align(
+        alignment: Alignment(ax, ay),
+        widthFactor: 1.0 / cols,
+        heightFactor: 1.0 / rows,
+        child: Image.memory(
+          gridImage,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
         ),
       ),
     );
