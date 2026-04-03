@@ -20,10 +20,7 @@ dependencies:
   camera: ^0.11.1
   image_picker: ^1.1.2
 
-  # AI
-  google_generative_ai: ^0.4.6
-
-  # HTTP (for Gemini image generation REST calls)
+  # HTTP (for Cloud Function calls)
   http: ^1.2.2
 
   # Image handling
@@ -33,6 +30,8 @@ dependencies:
 
   # Firebase
   firebase_core: ^3.13.0
+  firebase_auth: ^5.6.0
+  cloud_firestore: ^5.6.1
   firebase_crashlytics: ^4.3.5
   firebase_analytics: ^11.5.2
 
@@ -41,7 +40,6 @@ dependencies:
   share_plus: ^12.0.2
   shared_preferences: ^2.5.5
   purchases_flutter: ^9.16.0
-  purchases_ui_flutter: ^9.16.0
 
 dev_dependencies:
   flutter_test:
